@@ -28,7 +28,6 @@
             </label>
         </div>
 
-        <!-- DASHBOARD -->
         <section id="dashboard" class="tab-content active">
             <h2>Dashboard</h2>
             <div class="dashboard-grid">
@@ -65,7 +64,6 @@
             </div>
         </section>
 
-        <!-- LOG WORK -->
         <section id="logwork" class="tab-content">
             <h2>Werkdag Registreren</h2>
             <div class="form-container">
@@ -100,7 +98,6 @@
             </div>
         </section>
 
-        <!-- SETTINGS -->
         <section id="settings" class="tab-content">
             <h2>Instellingen</h2>
             <div class="form-container">
@@ -154,7 +151,6 @@
             </div>
         </section>
 
-        <!-- REPORT -->
         <section id="report" class="tab-content">
             <h2>Rapportage</h2>
             <div class="report-selector">

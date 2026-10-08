@@ -319,18 +319,10 @@ const Calculator = {
         return (end - start) / 60;
     },
 
-    getEffectiveHourlyRate(dateValue, settings) {
-        return getEffectiveValue(settings.hourlyRates, dateValue);
-    },
-
-    getEffectiveBikeAllowance(dateValue, settings) {
-        return getEffectiveValue(settings.bikeAllowances, dateValue);
-    },
-
     calculateEarnings(entry, settings) {
         const workDate = entry.date;
-        const hourlyRate = this.getEffectiveHourlyRate(workDate, settings);
-        const bikeAllowance = this.getEffectiveBikeAllowance(workDate, settings);
+        const hourlyRate = getEffectiveValue(settings.hourlyRates, workDate);
+        const bikeAllowance = getEffectiveValue(settings.bikeAllowances, workDate);
         const hours = this.getShiftHours(entry);
         const dayOfWeek = new Date(`${workDate}T00:00:00`).getDay();
 
@@ -338,7 +330,6 @@ const Calculator = {
         let bonusEarnings = 0;
 
         const bonuses = getEffectiveBonuses(settings.bonuses, workDate);
-
         bonuses.forEach(bonus => {
             if (!this.bonusAppliesToDay(bonus, dayOfWeek)) return;
             const bonusHours = this.calculateBonusHours(entry, bonus);
