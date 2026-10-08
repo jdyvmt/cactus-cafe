@@ -28,6 +28,7 @@ function formatTimeValue(value) {
 const DataManager = {
     STORAGE_KEY_ENTRIES: 'cactus_work_entries',
     STORAGE_KEY_SETTINGS: 'cactus_settings',
+    STORAGE_KEY_ACTUALS: 'cactus_actuals',
 
     getEntries() {
         const data = localStorage.getItem(this.STORAGE_KEY_ENTRIES);
@@ -66,6 +67,26 @@ const DataManager = {
 
     saveSettings(settings) {
         localStorage.setItem(this.STORAGE_KEY_SETTINGS, JSON.stringify(settings));
+    },
+
+    getActuals() {
+        const data = localStorage.getItem(this.STORAGE_KEY_ACTUALS);
+        return data ? JSON.parse(data) : {};
+    },
+
+    saveActuals(actuals) {
+        localStorage.setItem(this.STORAGE_KEY_ACTUALS, JSON.stringify(actuals));
+    },
+
+    saveActual(yearMonth, amount) {
+        const actuals = this.getActuals();
+        actuals[yearMonth] = Number(amount) || 0;
+        this.saveActuals(actuals);
+    },
+
+    getActual(yearMonth) {
+        const actuals = this.getActuals();
+        return actuals[yearMonth] || null;
     }
 };
 
@@ -168,6 +189,9 @@ const Calculator = {
 
 // UI Manager
 const UI = {
+    currentReportYear: null,
+    currentReportMonth: null,
+
     init() {
         this.setupEventListeners();
         this.setDefaultDate();
@@ -182,6 +206,7 @@ const UI = {
         });
 
         document.getElementById('logWorkForm').addEventListener('submit', (e) => this.handleLogWork(e));
+        document.getElementById('bulkWorkForm')?.addEventListener('submit', (e) => this.handleBulkLogWork(e));
         document.getElementById('settingsForm').addEventListener('submit', (e) => this.handleSettingsSave(e));
 
         const addRateBtn = document.getElementById('addRateHistoryBtn');
@@ -195,27 +220,6 @@ const UI = {
 
         const genReportBtn = document.getElementById('generateReportBtn');
         if (genReportBtn) genReportBtn.addEventListener('click', () => this.generateReport());
-
-        const exportBtn = document.getElementById('exportDataBtn');
-        if (exportBtn) exportBtn.addEventListener('click', () => ExportImport.exportData());
-
-        const importInput = document.getElementById('importFileInput');
-        if (importInput) {
-            importInput.addEventListener('change', (e) => {
-                const file = e.target.files[0];
-                if (file) ExportImport.importFile(file);
-                e.target.value = '';
-            });
-        }
-
-        const saveCloudConfigBtn = document.getElementById('saveCloudConfigBtn');
-        if (saveCloudConfigBtn) saveCloudConfigBtn.addEventListener('click', () => this.saveCloudConfig());
-
-        const syncToCloudBtn = document.getElementById('syncToCloudBtn');
-        if (syncToCloudBtn) syncToCloudBtn.addEventListener('click', () => CloudSync.saveToCloud());
-
-        const loadFromCloudBtn = document.getElementById('loadFromCloudBtn');
-        if (loadFromCloudBtn) loadFromCloudBtn.addEventListener('click', () => CloudSync.loadFromCloud());
     },
 
     switchTab(tabName) {
@@ -231,6 +235,7 @@ const UI = {
         if (tabName === 'dashboard') this.renderDashboard();
         if (tabName === 'logwork') this.renderAllEntries();
         if (tabName === 'settings') this.renderSettings();
+        if (tabName === 'report') this.renderReportYearSelect();
     },
 
     setDefaultDate() {
@@ -238,27 +243,8 @@ const UI = {
         const workDate = document.getElementById('workDate');
         if (workDate) workDate.value = today;
 
-        const reportMonth = document.getElementById('reportMonth');
-        if (reportMonth) reportMonth.value = today.slice(0, 7);
-    },
-
-    saveCloudConfig() {
-        const config = {
-            apiKey: document.getElementById('cloudApiKey').value.trim(),
-            authDomain: document.getElementById('cloudAuthDomain').value.trim(),
-            projectId: document.getElementById('cloudProjectId').value.trim(),
-            databaseURL: document.getElementById('cloudDatabaseURL').value.trim()
-        };
-        DataManager.saveCloudConfig(config);
-        alert('Cloud-configuratie opgeslagen.');
-    },
-
-    loadCloudConfig() {
-        const config = DataManager.getCloudConfig();
-        document.getElementById('cloudApiKey').value = config.apiKey || '';
-        document.getElementById('cloudAuthDomain').value = config.authDomain || '';
-        document.getElementById('cloudProjectId').value = config.projectId || '';
-        document.getElementById('cloudDatabaseURL').value = config.databaseURL || '';
+        const bulkStartDate = document.getElementById('bulkStartDate');
+        if (bulkStartDate) bulkStartDate.value = today;
     },
 
     handleLogWork(e) {
@@ -284,36 +270,74 @@ const UI = {
         this.renderDashboard();
     },
 
+    handleBulkLogWork(e) {
+        e.preventDefault();
+
+        const startDate = new Date(document.getElementById('bulkStartDate').value);
+        const entries = [];
+        const days = parseInt(document.getElementById('bulkDays').value) || 1;
+        const startTime = document.getElementById('bulkStartTime').value;
+        const endTime = document.getElementById('bulkEndTime').value;
+        const notes = document.getElementById('bulkNotes').value;
+
+        if (!startDate || !startTime || !endTime || days < 1) {
+            alert('Vul alstublieft alle vereiste velden in');
+            return;
+        }
+
+        for (let i = 0; i < days; i++) {
+            const currentDate = new Date(startDate);
+            currentDate.setDate(currentDate.getDate() + i);
+            const dateString = currentDate.toISOString().split('T')[0];
+
+            const entry = {
+                date: dateString,
+                startTime: startTime,
+                endTime: endTime,
+                notes: notes
+            };
+            DataManager.addEntry(entry);
+            entries.push(entry);
+        }
+
+        alert(`${days} werkdagen opgeslagen!`);
+        e.target.reset();
+        this.setDefaultDate();
+        this.renderAllEntries();
+        this.renderDashboard();
+    },
+
     renderDashboard() {
         const entries = DataManager.getEntries();
         const settings = DataManager.getSettings();
         const now = new Date();
 
+        // Current month
         const currentMonthEntries = entries.filter(e => {
             const date = new Date(`${e.date}T00:00:00`);
             return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
         });
 
+        const totalCurrent = currentMonthEntries.reduce((sum, e) => sum + Calculator.calculateEarnings(e, settings).total, 0);
+        const avgPerDay = currentMonthEntries.length ? totalCurrent / currentMonthEntries.length : 0;
+
+        // Previous year same month
         const sameMonthLastYearEntries = entries.filter(e => {
             const date = new Date(`${e.date}T00:00:00`);
             return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear() - 1;
         });
-
-        const totalCurrent = currentMonthEntries.reduce((sum, e) => sum + Calculator.calculateEarnings(e, settings).total, 0);
         const totalLastYear = sameMonthLastYearEntries.reduce((sum, e) => sum + Calculator.calculateEarnings(e, settings).total, 0);
-        const avgPerDay = currentMonthEntries.length ? totalCurrent / currentMonthEntries.length : 0;
 
-        const currentMonthEarnings = document.getElementById('currentMonthEarnings');
-        if (currentMonthEarnings) currentMonthEarnings.textContent = `€ ${totalCurrent.toFixed(2)}`;
+        // All years total
+        const allYearsTotal = entries.reduce((sum, e) => sum + Calculator.calculateEarnings(e, settings).total, 0);
 
-        const currentMonthDays = document.getElementById('currentMonthDays');
-        if (currentMonthDays) currentMonthDays.textContent = currentMonthEntries.length;
-
-        const averagePerDayEl = document.getElementById('averagePerDay');
-        if (averagePerDayEl) averagePerDayEl.textContent = `€ ${avgPerDay.toFixed(2)}`;
-
-        const previousMonthEarnings = document.getElementById('previousMonthEarnings');
-        if (previousMonthEarnings) previousMonthEarnings.textContent = `€ ${totalLastYear.toFixed(2)}`;
+        document.getElementById('currentMonthEarnings').textContent = `€ ${totalCurrent.toFixed(2)}`;
+        document.getElementById('currentMonthDays').textContent = currentMonthEntries.length;
+        document.getElementById('averagePerDay').textContent = `€ ${avgPerDay.toFixed(2)}`;
+        document.getElementById('previousMonthEarnings').textContent = `€ ${totalLastYear.toFixed(2)}`;
+        
+        const allYearsEl = document.getElementById('allYearsEarnings');
+        if (allYearsEl) allYearsEl.textContent = `€ ${allYearsTotal.toFixed(2)}`;
 
         this.renderChart(currentMonthEntries, settings);
         this.renderRecentEntries(currentMonthEntries, settings);
@@ -702,100 +726,198 @@ const UI = {
         this.renderDashboard();
     },
 
-    generateReport() {
-        const month = document.getElementById('reportMonth').value;
+    renderReportYearSelect() {
         const entries = DataManager.getEntries();
-        const settings = DataManager.getSettings();
+        const reportContainer = document.getElementById('reportContainer');
+        if (!reportContainer) return;
 
-        if (!month) {
-            alert('Selecteer alstublieft een maand');
+        const years = new Set();
+        entries.forEach(entry => {
+            const year = new Date(`${entry.date}T00:00:00`).getFullYear();
+            years.add(year);
+        });
+
+        if (years.size === 0) {
+            reportContainer.innerHTML = '<div class="empty-state"><p>Geen werkdagen geregistreerd</p></div>';
             return;
         }
 
-        const [year, monthNum] = month.split('-');
-        const monthDate = new Date(year, monthNum - 1, 1);
-        const nextMonth = new Date(year, monthNum, 1);
+        const sortedYears = Array.from(years).sort((a, b) => b - a);
+
+        reportContainer.innerHTML = `
+            <div class="report-selector">
+                <h3>Selecteer een jaar</h3>
+                <div class="year-buttons">
+                    ${sortedYears.map(year => `
+                        <button class="btn btn-primary" onclick="UI.selectReportYear(${year})">${year}</button>
+                    `).join('')}
+                </div>
+                <div id="reportContent"></div>
+            </div>
+        `;
+    },
+
+    selectReportYear(year) {
+        this.currentReportYear = year;
+        const entries = DataManager.getEntries();
+        const reportContainer = document.getElementById('reportContent');
+
+        const yearEntries = entries.filter(e => {
+            const entryYear = new Date(`${e.date}T00:00:00`).getFullYear();
+            return entryYear === year;
+        });
+
+        const months = new Set();
+        yearEntries.forEach(entry => {
+            const month = new Date(`${entry.date}T00:00:00`).getMonth();
+            months.add(month);
+        });
+
+        const sortedMonths = Array.from(months).sort((a, b) => b - a);
+        const monthNames = ['Jan', 'Feb', 'Mrt', 'Apr', 'Mei', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dec'];
+
+        reportContainer.innerHTML = `
+            <h3>Maanden in ${year}</h3>
+            <div class="month-buttons">
+                ${sortedMonths.map(month => {
+                    const date = new Date(year, month, 1);
+                    const monthName = date.toLocaleDateString('nl-NL', { month: 'long' });
+                    const yearMonth = `${year}-${String(month + 1).padStart(2, '0')}`;
+                    return `
+                        <button class="btn btn-secondary" onclick="UI.selectReportMonth(${year}, ${month})">${monthName}</button>
+                    `;
+                }).join('')}
+                <button class="btn btn-success" onclick="UI.showYearSummary(${year})">Heel jaar ${year}</button>
+                <button class="btn btn-default" onclick="UI.renderReportYearSelect()">Terug</button>
+            </div>
+            <div id="reportMonthContent"></div>
+        `;
+    },
+
+    selectReportMonth(year, month) {
+        this.currentReportYear = year;
+        this.currentReportMonth = month;
+
+        const entries = DataManager.getEntries();
+        const settings = DataManager.getSettings();
+        const reportContainer = document.getElementById('reportMonthContent');
 
         const monthEntries = entries.filter(e => {
             const date = new Date(`${e.date}T00:00:00`);
-            return date >= monthDate && date < nextMonth;
+            return date.getFullYear() === year && date.getMonth() === month;
         }).sort((a, b) => new Date(`${a.date}T00:00:00`) - new Date(`${b.date}T00:00:00`));
 
-        const previousYear = new Date(year - 1, monthNum - 1, 1);
-        const previousYearEnd = new Date(year - 1, monthNum, 1);
-        const previousYearEntries = entries.filter(e => {
-            const date = new Date(`${e.date}T00:00:00`);
-            return date >= previousYear && date < previousYearEnd;
-        });
-
         const monthTotal = monthEntries.reduce((sum, e) => sum + Calculator.calculateEarnings(e, settings).total, 0);
-        const previousYearTotal = previousYearEntries.reduce((sum, e) => sum + Calculator.calculateEarnings(e, settings).total, 0);
-        const difference = monthTotal - previousYearTotal;
-        const percentageDifference = previousYearTotal > 0 ? ((difference / previousYearTotal) * 100).toFixed(2) : 0;
+        const yearMonth = `${year}-${String(month + 1).padStart(2, '0')}`;
+        const actualAmount = DataManager.getActual(yearMonth);
 
-        const reportContent = document.getElementById('reportContent');
-        const monthName = monthDate.toLocaleDateString('nl-NL', { month: 'long', year: 'numeric' });
-        const previousMonthName = new Date(year - 1, monthNum - 1, 1).toLocaleDateString('nl-NL', { month: 'long', year: 'numeric' });
+        const monthName = new Date(year, month, 1).toLocaleDateString('nl-NL', { month: 'long', year: 'numeric' });
 
         let html = `
-            <div class="comparison">
-                <div class="comparison-card">
-                    <h4>${monthName}</h4>
-                    <div class="comparison-amount">€${monthTotal.toFixed(2)}</div>
-                    <p>${monthEntries.length} werkdagen</p>
-                </div>
-                <div class="comparison-card">
-                    <h4>${previousMonthName}</h4>
-                    <div class="comparison-amount">€${previousYearTotal.toFixed(2)}</div>
-                    <p>${previousYearEntries.length} werkdagen</p>
-                </div>
-            </div>
-
+            <h4>${monthName}</h4>
             <div class="report-summary">
-                <h4>Vergelijking</h4>
-                <p>Verschil: <span class="${difference >= 0 ? 'positive' : 'negative'}">${difference >= 0 ? '+' : ''}€${difference.toFixed(2)} (${difference >= 0 ? '+' : ''}${percentageDifference}%)</span></p>
-            </div>
+                <p><strong>Berekend:</strong> €${monthTotal.toFixed(2)}</p>
+                <div class="form-group">
+                    <label>Daadwerkelijk ontvangen (€):</label>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <input type="number" step="0.01" id="actualAmount" value="${actualAmount || ''}" placeholder="0,00">
+                        <button class="btn btn-primary" onclick="UI.saveActualAmount('${yearMonth}')">Opslaan</button>
+                    </div>
+                </div>
         `;
 
-        if (monthEntries.length > 0) {
-            html += `
-                <div class="report-content">
-                    <h3>Details ${monthName}</h3>
-                    <table class="report-table">
-                        <thead>
-                            <tr>
-                                <th>Datum</th>
-                                <th>Uren</th>
-                                <th>Basis</th>
-                                <th>Bonus</th>
-                                <th>Fiets</th>
-                                <th>Totaal</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${monthEntries.map(entry => {
-                                const earnings = Calculator.calculateEarnings(entry, settings);
-                                const date = new Date(`${entry.date}T00:00:00`).toLocaleDateString('nl-NL');
-                                return `
-                                    <tr>
-                                        <td>${date}</td>
-                                        <td>${earnings.hours}</td>
-                                        <td>€${earnings.baseEarnings.toFixed(2)}</td>
-                                        <td>€${earnings.bonusEarnings.toFixed(2)}</td>
-                                        <td>€${earnings.bikeAllowance.toFixed(2)}</td>
-                                        <td><strong>€${earnings.total.toFixed(2)}</strong></td>
-                                    </tr>
-                                `;
-                            }).join('')}
-                        </tbody>
-                    </table>
-                </div>
-            `;
-        } else {
-            html += '<div class="empty-state"><p>Geen werkdagen in deze maand</p></div>';
+        if (actualAmount) {
+            const difference = actualAmount - monthTotal;
+            const diffClass = difference >= 0 ? 'positive' : 'negative';
+            html += `<p><strong>Verschil:</strong> <span class="${diffClass}">${difference >= 0 ? '+' : ''}€${difference.toFixed(2)}</span></p>`;
         }
 
-        reportContent.innerHTML = html;
+        html += `</div><table class="report-table"><thead><tr><th>Datum</th><th>Uren</th><th>Basis</th><th>Bonus</th><th>Fiets</th><th>Totaal</th></tr></thead><tbody>`;
+
+        monthEntries.forEach(entry => {
+            const earnings = Calculator.calculateEarnings(entry, settings);
+            const date = new Date(`${entry.date}T00:00:00`).toLocaleDateString('nl-NL');
+            html += `<tr><td>${date}</td><td>${earnings.hours}</td><td>€${earnings.baseEarnings.toFixed(2)}</td><td>€${earnings.bonusEarnings.toFixed(2)}</td><td>€${earnings.bikeAllowance.toFixed(2)}</td><td><strong>€${earnings.total.toFixed(2)}</strong></td></tr>`;
+        });
+
+        html += `</tbody></table><button class="btn btn-default" onclick="UI.selectReportYear(${year})">Terug</button>`;
+
+        reportContainer.innerHTML = html;
+    },
+
+    saveActualAmount(yearMonth) {
+        const amount = document.getElementById('actualAmount').value;
+        if (amount === '') {
+            alert('Voer een bedrag in');
+            return;
+        }
+        DataManager.saveActual(yearMonth, amount);
+        alert('Bedrag opgeslagen!');
+        this.renderDashboard();
+        const [year, month] = yearMonth.split('-');
+        this.selectReportMonth(parseInt(year), parseInt(month) - 1);
+    },
+
+    showYearSummary(year) {
+        const entries = DataManager.getEntries();
+        const settings = DataManager.getSettings();
+        const reportContainer = document.getElementById('reportMonthContent');
+
+        const yearEntries = entries.filter(e => {
+            const entryYear = new Date(`${e.date}T00:00:00`).getFullYear();
+            return entryYear === year;
+        }).sort((a, b) => new Date(`${a.date}T00:00:00`) - new Date(`${b.date}T00:00:00`));
+
+        const yearTotal = yearEntries.reduce((sum, e) => sum + Calculator.calculateEarnings(e, settings).total, 0);
+
+        const actuals = DataManager.getActuals();
+        let actualYearTotal = 0;
+        for (let month = 0; month < 12; month++) {
+            const yearMonth = `${year}-${String(month + 1).padStart(2, '0')}`;
+            if (actuals[yearMonth]) {
+                actualYearTotal += actuals[yearMonth];
+            }
+        }
+
+        let html = `
+            <h4>Overzicht ${year}</h4>
+            <div class="report-summary">
+                <p><strong>Berekend totaal:</strong> €${yearTotal.toFixed(2)}</p>
+        `;
+
+        if (actualYearTotal > 0) {
+            const difference = actualYearTotal - yearTotal;
+            const diffClass = difference >= 0 ? 'positive' : 'negative';
+            html += `
+                <p><strong>Daadwerkelijk ontvangen:</strong> €${actualYearTotal.toFixed(2)}</p>
+                <p><strong>Verschil:</strong> <span class="${diffClass}">${difference >= 0 ? '+' : ''}€${difference.toFixed(2)}</span></p>
+            `;
+        }
+
+        html += `</div><table class="report-table"><thead><tr><th>Maand</th><th>Berekend</th><th>Ontvangen</th><th>Verschil</th></tr></thead><tbody>`;
+
+        const monthNames = ['Januari', 'Februari', 'Maart', 'April', 'Mei', 'Juni', 'Juli', 'Augustus', 'September', 'Oktober', 'November', 'December'];
+
+        for (let month = 0; month < 12; month++) {
+            const yearMonth = `${year}-${String(month + 1).padStart(2, '0')}`;
+            const monthEntries = yearEntries.filter(e => {
+                const entryMonth = new Date(`${e.date}T00:00:00`).getMonth();
+                return entryMonth === month;
+            });
+
+            const monthTotal = monthEntries.reduce((sum, e) => sum + Calculator.calculateEarnings(e, settings).total, 0);
+            const actualAmount = actuals[yearMonth];
+            const difference = actualAmount ? actualAmount - monthTotal : 0;
+
+            if (monthTotal > 0 || actualAmount) {
+                const diffClass = difference >= 0 ? 'positive' : 'negative';
+                html += `<tr><td>${monthNames[month]}</td><td>€${monthTotal.toFixed(2)}</td><td>${actualAmount ? `€${actualAmount.toFixed(2)}` : '-'}</td><td>${difference ? `<span class="${diffClass}">${difference >= 0 ? '+' : ''}€${difference.toFixed(2)}</span>` : '-'}</td></tr>`;
+            }
+        }
+
+        html += `</tbody></table><button class="btn btn-default" onclick="UI.selectReportYear(${year})">Terug</button>`;
+
+        reportContainer.innerHTML = html;
     }
 };
 
