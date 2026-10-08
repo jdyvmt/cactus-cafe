@@ -28,11 +28,14 @@ const DataManager = {
 
     getSettings() {
         const data = localStorage.getItem(this.STORAGE_KEY_SETTINGS);
-        return data ? JSON.parse(data) : {
-            hourlyRate: 12.50,
-            bikeAllowance: 0.50,
-            bonuses: []
-        };
+        if (!data) {
+            return {
+                hourlyRates: [{ id: Date.now(), amount: 12.50, validFrom: new Date().toISOString().split('T')[0] }],
+                bikeAllowances: [{ id: Date.now(), amount: 0.50, validFrom: new Date().toISOString().split('T')[0] }],
+                bonuses: []
+            };
+        }
+        return JSON.parse(data);
     },
 
     saveSettings(settings) {
@@ -50,16 +53,20 @@ const Calculator = {
         if (hours < 0) hours += 24; // Handle overnight shifts
 
         const workDate = new Date(entry.date);
-        const dayOfWeek = workDate.getDay(); // 0 = Sunday, 1 = Monday, etc.
+        const dayOfWeek = workDate.getDay();
 
-        let baseEarnings = hours * settings.hourlyRate;
+        // Get hourly rate for the work date
+        const hourlyRate = this.getEffectiveRate(settings.hourlyRates, entry.date);
+        const bikeAllowance = this.getEffectiveRate(settings.bikeAllowances, entry.date);
+
+        let baseEarnings = hours * hourlyRate;
         let bonusEarnings = 0;
 
         // Apply bonuses
-        if (settings.bonuses) {
+        if (settings.bonuses && Array.isArray(settings.bonuses)) {
             settings.bonuses.forEach(bonus => {
                 if (bonus.type === 'percentage') {
-                    const bonusAmount = this.calculateBonusPercentage(entry, bonus, settings, hours, dayOfWeek);
+                    const bonusAmount = this.calculateBonusPercentage(entry, bonus, hourlyRate, hours, dayOfWeek);
                     bonusEarnings += bonusAmount;
                 } else if (bonus.type === 'fixed') {
                     if (this.bonusAppliesToDay(bonus, dayOfWeek)) {
@@ -67,12 +74,6 @@ const Calculator = {
                     }
                 }
             });
-        }
-
-        // Add bike allowance
-        let bikeAllowance = 0;
-        if (settings.bikeAllowance && settings.bikeAllowance > 0) {
-            bikeAllowance = settings.bikeAllowance;
         }
 
         return {
@@ -84,36 +85,48 @@ const Calculator = {
         };
     },
 
-    calculateBonusPercentage(entry, bonus, settings, hours, dayOfWeek) {
-        // Check if bonus applies to this day
+    getEffectiveRate(rates, dateValue) {
+        if (!Array.isArray(rates) || rates.length === 0) return 0;
+        
+        const date = new Date(`${dateValue}T00:00:00`);
+        let effective = rates[0];
+
+        rates.forEach(rate => {
+            const validFrom = new Date(`${rate.validFrom}T00:00:00`);
+            if (validFrom <= date) {
+                effective = rate;
+            }
+        });
+
+        return Number(effective.amount) || 0;
+    },
+
+    calculateBonusPercentage(entry, bonus, hourlyRate, hours, dayOfWeek) {
         if (!this.bonusAppliesToDay(bonus, dayOfWeek)) {
             return 0;
         }
 
-        // Check if bonus applies to time window
         if (bonus.startHour !== undefined && bonus.endHour !== undefined) {
             const start = new Date(`2000-01-01T${entry.startTime}`);
             const end = new Date(`2000-01-01T${entry.endTime}`);
             const startHour = bonus.startHour;
             const endHour = bonus.endHour;
 
-            // Calculate hours within the bonus time window
             let bonusHours = 0;
             const checkDate = new Date(`2000-01-01T${entry.startTime}`);
             const endCheckDate = new Date(`2000-01-01T${entry.endTime}`);
-            if (endCheckDate < checkDate) endCheckDate.setDate(2); // Next day if overnight
+            if (endCheckDate < checkDate) endCheckDate.setDate(2);
 
             if (checkDate.getHours() >= startHour && checkDate.getHours() < endHour) {
                 bonusHours = Math.min(endHour - checkDate.getHours(), (endCheckDate - checkDate) / (1000 * 60 * 60));
             }
 
             if (bonusHours > 0) {
-                return Math.round((bonusHours * settings.hourlyRate * bonus.percentage / 100) * 100) / 100;
+                return Math.round((bonusHours * hourlyRate * bonus.percentage / 100) * 100) / 100;
             }
         }
 
-        // Apply to all hours
-        return Math.round((hours * settings.hourlyRate * bonus.percentage / 100) * 100) / 100;
+        return Math.round((hours * hourlyRate * bonus.percentage / 100) * 100) / 100;
     },
 
     bonusAppliesToDay(bonus, dayOfWeek) {
@@ -135,39 +148,56 @@ const UI = {
     },
 
     setupEventListeners() {
-        // Tab navigation
         document.querySelectorAll('.nav-btn').forEach(btn => {
             btn.addEventListener('click', (e) => this.switchTab(e.target.dataset.tab));
         });
 
-        // Form submissions
         document.getElementById('logWorkForm').addEventListener('submit', (e) => this.handleLogWork(e));
         document.getElementById('settingsForm').addEventListener('submit', (e) => this.handleSettingsSave(e));
-        document.getElementById('addBonusBtn').addEventListener('click', () => this.addBonusField());
-        document.getElementById('generateReportBtn').addEventListener('click', () => this.generateReport());
+        
+        // Rate history buttons
+        const addRateBtn = document.getElementById('addRateHistoryBtn');
+        if (addRateBtn) addRateBtn.addEventListener('click', () => this.addRateHistoryRow());
+        
+        // Bike allowance buttons
+        const addBikeBtn = document.getElementById('addBikeAllowanceBtn');
+        if (addBikeBtn) addBikeBtn.addEventListener('click', () => this.addBikeAllowanceRow());
+        
+        // Bonus button
+        const addBonusBtn = document.getElementById('addBonusBtn');
+        if (addBonusBtn) addBonusBtn.addEventListener('click', () => this.addBonusField());
+        
+        // Report button
+        const genReportBtn = document.getElementById('generateReportBtn');
+        if (genReportBtn) genReportBtn.addEventListener('click', () => this.generateReport());
     },
 
     switchTab(tabName) {
-        // Hide all tabs
         document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
         document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
 
-        // Show selected tab
-        document.getElementById(tabName).classList.add('active');
-        document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+        const tab = document.getElementById(tabName);
+        if (tab) tab.classList.add('active');
+        
+        const btn = document.querySelector(`[data-tab="${tabName}"]`);
+        if (btn) btn.classList.add('active');
 
-        // Refresh data if needed
         if (tabName === 'dashboard') {
             this.renderDashboard();
         } else if (tabName === 'logwork') {
             this.renderAllEntries();
+        } else if (tabName === 'settings') {
+            this.renderSettings();
         }
     },
 
     setDefaultDate() {
         const today = new Date().toISOString().split('T')[0];
-        document.getElementById('workDate').value = today;
-        document.getElementById('reportMonth').value = today.slice(0, 7);
+        const workDate = document.getElementById('workDate');
+        if (workDate) workDate.value = today;
+        
+        const reportMonth = document.getElementById('reportMonth');
+        if (reportMonth) reportMonth.value = today.slice(0, 7);
     },
 
     handleLogWork(e) {
@@ -197,16 +227,17 @@ const UI = {
         const entries = DataManager.getEntries();
         const settings = DataManager.getSettings();
         const allEntriesDiv = document.getElementById('allEntries');
+        
+        if (!allEntriesDiv) return;
 
         if (entries.length === 0) {
             allEntriesDiv.innerHTML = '<div class="empty-state"><p>Geen werkdagen geregistreerd</p></div>';
             return;
         }
 
-        // Sort by date descending
-        entries.sort((a, b) => new Date(b.date) - new Date(a.date));
+        const sortedEntries = [...entries].sort((a, b) => new Date(b.date) - new Date(a.date));
 
-        allEntriesDiv.innerHTML = entries.map(entry => {
+        allEntriesDiv.innerHTML = sortedEntries.map(entry => {
             const earnings = Calculator.calculateEarnings(entry, settings);
             const date = new Date(entry.date).toLocaleDateString('nl-NL', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
@@ -215,7 +246,7 @@ const UI = {
                     <div class="entry-info">
                         <div class="entry-date">${date}</div>
                         <div class="entry-details">${entry.startTime} - ${entry.endTime} (${earnings.hours}u)</div>
-                        <div class="entry-details">Base: €${earnings.baseEarnings.toFixed(2)} + Bonus: €${earnings.bonusEarnings.toFixed(2)} + Fiets: €${earnings.bikeAllowance.toFixed(2)}</div>
+                        <div class="entry-details">Basis: €${earnings.baseEarnings.toFixed(2)} + Bonus: €${earnings.bonusEarnings.toFixed(2)} + Fiets: €${earnings.bikeAllowance.toFixed(2)}</div>
                         ${entry.notes ? `<div class="entry-details">📝 ${entry.notes}</div>` : ''}
                     </div>
                     <div style="text-align: right;">
@@ -242,49 +273,43 @@ const UI = {
         const currentMonth = now.getMonth();
         const currentYear = now.getFullYear();
 
-        // Current month entries
         const currentMonthEntries = entries.filter(e => {
             const date = new Date(e.date);
             return date.getMonth() === currentMonth && date.getFullYear() === currentYear;
         });
 
-        // Previous month entries
         const previousDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
         const previousMonthEntries = entries.filter(e => {
             const date = new Date(e.date);
             return date.getMonth() === previousDate.getMonth() && date.getFullYear() === previousDate.getFullYear();
         });
 
-        // Calculate totals
-        const currentMonthTotal = currentMonthEntries.reduce((sum, e) => {
-            const earnings = Calculator.calculateEarnings(e, settings);
-            return sum + earnings.total;
-        }, 0);
-
-        const previousMonthTotal = previousMonthEntries.reduce((sum, e) => {
-            const earnings = Calculator.calculateEarnings(e, settings);
-            return sum + earnings.total;
-        }, 0);
-
+        const currentMonthTotal = currentMonthEntries.reduce((sum, e) => sum + Calculator.calculateEarnings(e, settings).total, 0);
+        const previousMonthTotal = previousMonthEntries.reduce((sum, e) => sum + Calculator.calculateEarnings(e, settings).total, 0);
         const averagePerDay = currentMonthEntries.length > 0 ? currentMonthTotal / currentMonthEntries.length : 0;
 
-        // Update cards
-        document.getElementById('currentMonthEarnings').textContent = `€ ${currentMonthTotal.toFixed(2)}`;
-        document.getElementById('currentMonthDays').textContent = currentMonthEntries.length;
-        document.getElementById('averagePerDay').textContent = `€ ${averagePerDay.toFixed(2)}`;
-        document.getElementById('previousMonthEarnings').textContent = `€ ${previousMonthTotal.toFixed(2)}`;
+        const currentEarningsEl = document.getElementById('currentMonthEarnings');
+        if (currentEarningsEl) currentEarningsEl.textContent = `€ ${currentMonthTotal.toFixed(2)}`;
+        
+        const daysEl = document.getElementById('currentMonthDays');
+        if (daysEl) daysEl.textContent = currentMonthEntries.length;
+        
+        const avgEl = document.getElementById('averagePerDay');
+        if (avgEl) avgEl.textContent = `€ ${averagePerDay.toFixed(2)}`;
+        
+        const prevEl = document.getElementById('previousMonthEarnings');
+        if (prevEl) prevEl.textContent = `€ ${previousMonthTotal.toFixed(2)}`;
 
-        // Render chart
         this.renderChart(currentMonthEntries, settings);
-
-        // Render recent entries
         this.renderRecentEntries(currentMonthEntries, settings);
     },
 
     renderChart(entries, settings) {
-        const ctx = document.getElementById('monthChart').getContext('2d');
+        const ctx = document.getElementById('monthChart');
+        if (!ctx) return;
+        
+        const chartCtx = ctx.getContext('2d');
 
-        // Group by day
         const byDay = {};
         entries.forEach(entry => {
             const date = new Date(entry.date).toLocaleDateString('nl-NL', { month: 'short', day: 'numeric' });
@@ -296,12 +321,11 @@ const UI = {
         const labels = Object.keys(byDay).sort();
         const data = labels.map(label => byDay[label]);
 
-        // Destroy previous chart if exists
         if (window.monthChartInstance) {
             window.monthChartInstance.destroy();
         }
 
-        window.monthChartInstance = new Chart(ctx, {
+        window.monthChartInstance = new Chart(chartCtx, {
             type: 'bar',
             data: {
                 labels: labels,
@@ -336,14 +360,14 @@ const UI = {
 
     renderRecentEntries(entries, settings) {
         const recentList = document.getElementById('recentList');
+        if (!recentList) return;
 
         if (entries.length === 0) {
             recentList.innerHTML = '<div class="empty-state"><p>Geen ingaven deze maand</p></div>';
             return;
         }
 
-        // Show last 5 entries
-        const recent = entries.sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 5);
+        const recent = [...entries].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 5);
 
         recentList.innerHTML = recent.map(entry => {
             const earnings = Calculator.calculateEarnings(entry, settings);
@@ -363,30 +387,137 @@ const UI = {
 
     renderSettings() {
         const settings = DataManager.getSettings();
-
-        document.getElementById('hourlyRate').value = settings.hourlyRate;
-        document.getElementById('bikeAllowance').value = settings.bikeAllowance || 0;
-
-        // Render bonuses
+        this.renderRateHistory(settings.hourlyRates || []);
+        this.renderBikeAllowanceHistory(settings.bikeAllowances || []);
         this.renderBonuses(settings.bonuses || []);
+    },
+
+    renderRateHistory(rates) {
+        const container = document.getElementById('hourlyRateHistory');
+        if (!container) return;
+
+        const sortedRates = [...rates].sort((a, b) => new Date(a.validFrom) - new Date(b.validFrom));
+
+        container.innerHTML = sortedRates.map((rate, index) => `
+            <div class="history-item">
+                <div class="history-fields">
+                    <div class="form-group">
+                        <label>Vanaf datum</label>
+                        <input type="date" class="rate-valid-from-${index}" value="${rate.validFrom || ''}">
+                    </div>
+                    <div class="form-group">
+                        <label>Bedrag (€)</label>
+                        <input type="number" step="0.01" min="0" class="rate-amount-${index}" value="${Number(rate.amount || 0).toFixed(2)}">
+                    </div>
+                    <button type="button" class="btn btn-danger btn-small" onclick="UI.removeRateHistoryEntry(${index})">Verwijder</button>
+                </div>
+            </div>
+        `).join('');
+    },
+
+    renderBikeAllowanceHistory(allowances) {
+        const container = document.getElementById('bikeAllowanceHistory');
+        if (!container) return;
+
+        const sortedAllowances = [...allowances].sort((a, b) => new Date(a.validFrom) - new Date(b.validFrom));
+
+        container.innerHTML = sortedAllowances.map((item, index) => `
+            <div class="history-item">
+                <div class="history-fields">
+                    <div class="form-group">
+                        <label>Vanaf datum</label>
+                        <input type="date" class="bike-valid-from-${index}" value="${item.validFrom || ''}">
+                    </div>
+                    <div class="form-group">
+                        <label>Bedrag (€)</label>
+                        <input type="number" step="0.01" min="0" class="bike-amount-${index}" value="${Number(item.amount || 0).toFixed(2)}">
+                    </div>
+                    <button type="button" class="btn btn-danger btn-small" onclick="UI.removeBikeAllowanceEntry(${index})">Verwijder</button>
+                </div>
+            </div>
+        `).join('');
+    },
+
+    addRateHistoryRow() {
+        const container = document.getElementById('hourlyRateHistory');
+        if (!container) return;
+        
+        const nextIndex = container.querySelectorAll('.history-item').length;
+        const today = new Date().toISOString().split('T')[0];
+
+        container.insertAdjacentHTML('beforeend', `
+            <div class="history-item">
+                <div class="history-fields">
+                    <div class="form-group">
+                        <label>Vanaf datum</label>
+                        <input type="date" class="rate-valid-from-${nextIndex}" value="${today}">
+                    </div>
+                    <div class="form-group">
+                        <label>Bedrag (€)</label>
+                        <input type="number" step="0.01" min="0" class="rate-amount-${nextIndex}" value="0">
+                    </div>
+                    <button type="button" class="btn btn-danger btn-small" onclick="UI.removeRateHistoryEntry(${nextIndex})">Verwijder</button>
+                </div>
+            </div>
+        `);
+    },
+
+    addBikeAllowanceRow() {
+        const container = document.getElementById('bikeAllowanceHistory');
+        if (!container) return;
+        
+        const nextIndex = container.querySelectorAll('.history-item').length;
+        const today = new Date().toISOString().split('T')[0];
+
+        container.insertAdjacentHTML('beforeend', `
+            <div class="history-item">
+                <div class="history-fields">
+                    <div class="form-group">
+                        <label>Vanaf datum</label>
+                        <input type="date" class="bike-valid-from-${nextIndex}" value="${today}">
+                    </div>
+                    <div class="form-group">
+                        <label>Bedrag (€)</label>
+                        <input type="number" step="0.01" min="0" class="bike-amount-${nextIndex}" value="0">
+                    </div>
+                    <button type="button" class="btn btn-danger btn-small" onclick="UI.removeBikeAllowanceEntry(${nextIndex})">Verwijder</button>
+                </div>
+            </div>
+        `);
+    },
+
+    removeRateHistoryEntry(index) {
+        const container = document.getElementById('hourlyRateHistory');
+        if (!container) return;
+        const items = container.querySelectorAll('.history-item');
+        if (items[index]) items[index].remove();
+    },
+
+    removeBikeAllowanceEntry(index) {
+        const container = document.getElementById('bikeAllowanceHistory');
+        if (!container) return;
+        const items = container.querySelectorAll('.history-item');
+        if (items[index]) items[index].remove();
     },
 
     renderBonuses(bonuses) {
         const bonusList = document.getElementById('bonusList');
-        bonusList.innerHTML = '';
+        if (!bonusList) return;
 
-        bonuses.forEach((bonus, index) => {
-            bonusList.innerHTML += this.createBonusField(bonus, index);
-        });
+        bonusList.innerHTML = (bonuses || []).map((bonus, index) => this.createBonusField(bonus, index)).join('');
     },
 
     createBonusField(bonus, index) {
         const days = ['Zo', 'Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za'];
         const selectedDays = bonus.days || [];
 
-        let bonusTypeHTML = '';
-        if (bonus.type === 'percentage') {
-            bonusTypeHTML = `
+        return `
+            <div class="bonus-item">
+                <div class="bonus-header-row">
+                    <h4>Toeslag ${index + 1}</h4>
+                    <button type="button" class="btn btn-danger btn-small" onclick="UI.removeBonusField(${index})">Verwijder</button>
+                </div>
+
                 <div class="bonus-row">
                     <div class="form-group">
                         <label>Naam</label>
@@ -394,96 +525,123 @@ const UI = {
                     </div>
                     <div class="form-group">
                         <label>Percentage (%)</label>
-                        <input type="number" class="bonus-percentage-${index}" step="0.5" min="0" value="${bonus.percentage || 0}">
+                        <input type="number" step="0.5" min="0" class="bonus-percentage-${index}" value="${Number(bonus.percentage || 0)}">
                     </div>
                     <div class="form-group">
                         <label>Van uur</label>
-                        <input type="number" class="bonus-start-${index}" min="0" max="23" value="${bonus.startHour || ''}" placeholder="(optioneel)">
+                        <input type="number" min="0" max="23" class="bonus-start-${index}" value="${bonus.startHour ?? ''}" placeholder="(optioneel)">
                     </div>
                     <div class="form-group">
                         <label>Tot uur</label>
-                        <input type="number" class="bonus-end-${index}" min="0" max="23" value="${bonus.endHour || ''}" placeholder="(optioneel)">
-                    </div>
-                    <button type="button" class="btn btn-danger btn-small" onclick="UI.removeBonusField(${index})">−</button>
-                </div>
-                <div class="bonus-row" style="grid-template-columns: 1fr;">
-                    <div class="form-group">
-                        <label>Toeslag geldt op dagen:</label>
-                        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                            ${days.map((day, dayIndex) => `
-                                <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
-                                    <input type="checkbox" class="bonus-day-${index}-${dayIndex}" ${selectedDays.includes(dayIndex) ? 'checked' : ''}>
-                                    ${day}
-                                </label>
-                            `).join('')}
-                        </div>
+                        <input type="number" min="0" max="23" class="bonus-end-${index}" value="${bonus.endHour ?? ''}" placeholder="(optioneel)">
                     </div>
                 </div>
-            `;
-        }
 
-        return `
-            <div class="bonus-item">
-                <h4>Toeslag ${index + 1}</h4>
-                ${bonusTypeHTML}
+                <div class="bonus-row-checkboxes">
+                    ${days.map((day, dayIndex) => `
+                        <label class="checkbox-inline">
+                            <input type="checkbox" class="bonus-day-${index}-${dayIndex}" ${selectedDays.includes(dayIndex) ? 'checked' : ''}>
+                            ${day}
+                        </label>
+                    `).join('')}
+                </div>
             </div>
         `;
     },
 
     addBonusField() {
         const bonusList = document.getElementById('bonusList');
-        const newIndex = bonusList.children.length;
-        bonusList.innerHTML += this.createBonusField({ type: 'percentage' }, newIndex);
+        if (!bonusList) return;
+        
+        const newIndex = bonusList.querySelectorAll('.bonus-item').length;
+        bonusList.insertAdjacentHTML('beforeend', this.createBonusField({
+            name: '',
+            percentage: 0,
+            startHour: '',
+            endHour: '',
+            days: [0, 1, 2, 3, 4, 5, 6]
+        }, newIndex));
     },
 
     removeBonusField(index) {
         const bonusList = document.getElementById('bonusList');
+        if (!bonusList) return;
         const items = bonusList.querySelectorAll('.bonus-item');
-        if (items[index]) {
-            items[index].remove();
-        }
+        if (items[index]) items[index].remove();
     },
 
     handleSettingsSave(e) {
         e.preventDefault();
 
-        const bonuses = [];
-        const bonusItems = document.querySelectorAll('.bonus-item');
+        // Collect hourly rates
+        const hourlyRates = [];
+        const rateItems = document.querySelectorAll('#hourlyRateHistory .history-item');
+        rateItems.forEach((item, index) => {
+            const validFromInput = item.querySelector(`.rate-valid-from-${index}`);
+            const amountInput = item.querySelector(`.rate-amount-${index}`);
+            if (validFromInput && amountInput && validFromInput.value && amountInput.value !== '') {
+                hourlyRates.push({
+                    id: Date.now() + index,
+                    amount: Number(amountInput.value) || 0,
+                    validFrom: validFromInput.value
+                });
+            }
+        });
 
+        // Collect bike allowances
+        const bikeAllowances = [];
+        const bikeItems = document.querySelectorAll('#bikeAllowanceHistory .history-item');
+        bikeItems.forEach((item, index) => {
+            const validFromInput = item.querySelector(`.bike-valid-from-${index}`);
+            const amountInput = item.querySelector(`.bike-amount-${index}`);
+            if (validFromInput && amountInput && validFromInput.value && amountInput.value !== '') {
+                bikeAllowances.push({
+                    id: Date.now() + index,
+                    amount: Number(amountInput.value) || 0,
+                    validFrom: validFromInput.value
+                });
+            }
+        });
+
+        // Collect bonuses
+        const bonuses = [];
+        const bonusItems = document.querySelectorAll('#bonusList .bonus-item');
         bonusItems.forEach((item, index) => {
             const nameInput = item.querySelector(`.bonus-name-${index}`);
             const percentageInput = item.querySelector(`.bonus-percentage-${index}`);
             const startInput = item.querySelector(`.bonus-start-${index}`);
             const endInput = item.querySelector(`.bonus-end-${index}`);
 
-            if (nameInput && percentageInput && percentageInput.value) {
-                const days = [];
-                for (let i = 0; i < 7; i++) {
-                    const dayCheckbox = item.querySelector(`.bonus-day-${index}-${i}`);
-                    if (dayCheckbox && dayCheckbox.checked) {
-                        days.push(i);
-                    }
-                }
+            if (!nameInput || !percentageInput) return;
+            const percentage = Number(percentageInput.value) || 0;
+            if (!percentage) return;
 
-                bonuses.push({
-                    type: 'percentage',
-                    name: nameInput.value || `Toeslag ${index + 1}`,
-                    percentage: parseFloat(percentageInput.value),
-                    startHour: startInput.value ? parseInt(startInput.value) : undefined,
-                    endHour: endInput.value ? parseInt(endInput.value) : undefined,
-                    days: days.length > 0 ? days : undefined
-                });
+            const days = [];
+            for (let i = 0; i < 7; i++) {
+                const dayCheck = item.querySelector(`.bonus-day-${index}-${i}`);
+                if (dayCheck && dayCheck.checked) days.push(i);
             }
+
+            bonuses.push({
+                id: Date.now() + index,
+                type: 'percentage',
+                name: nameInput.value || `Toeslag ${index + 1}`,
+                percentage: percentage,
+                startHour: startInput.value ? Number(startInput.value) : undefined,
+                endHour: endInput.value ? Number(endInput.value) : undefined,
+                days: days.length ? days : [0, 1, 2, 3, 4, 5, 6]
+            });
         });
 
         const settings = {
-            hourlyRate: parseFloat(document.getElementById('hourlyRate').value),
-            bikeAllowance: parseFloat(document.getElementById('bikeAllowance').value) || 0,
+            hourlyRates: hourlyRates.length ? hourlyRates : [{ id: Date.now(), amount: 12.50, validFrom: new Date().toISOString().split('T')[0] }],
+            bikeAllowances: bikeAllowances.length ? bikeAllowances : [{ id: Date.now(), amount: 0.50, validFrom: new Date().toISOString().split('T')[0] }],
             bonuses: bonuses
         };
 
         DataManager.saveSettings(settings);
         alert('Instellingen opgeslagen!');
+        this.renderSettings();
         this.renderDashboard();
     },
 
@@ -501,13 +659,11 @@ const UI = {
         const monthDate = new Date(year, monthNum - 1, 1);
         const nextMonth = new Date(year, monthNum, 1);
 
-        // Get entries for selected month
         const monthEntries = entries.filter(e => {
             const date = new Date(e.date);
             return date >= monthDate && date < nextMonth;
         }).sort((a, b) => new Date(a.date) - new Date(b.date));
 
-        // Get entries for same month previous year
         const previousYear = new Date(year - 1, monthNum - 1, 1);
         const previousYearEnd = new Date(year - 1, monthNum, 1);
         const previousYearEntries = entries.filter(e => {
@@ -515,13 +671,11 @@ const UI = {
             return date >= previousYear && date < previousYearEnd;
         });
 
-        // Calculate totals
         const monthTotal = monthEntries.reduce((sum, e) => sum + Calculator.calculateEarnings(e, settings).total, 0);
         const previousYearTotal = previousYearEntries.reduce((sum, e) => sum + Calculator.calculateEarnings(e, settings).total, 0);
         const difference = monthTotal - previousYearTotal;
         const percentageDifference = previousYearTotal > 0 ? ((difference / previousYearTotal) * 100).toFixed(2) : 0;
 
-        // Build report HTML
         const reportContent = document.getElementById('reportContent');
         const monthName = monthDate.toLocaleDateString('nl-NL', { month: 'long', year: 'numeric' });
         const previousMonthName = new Date(year - 1, monthNum - 1, 1).toLocaleDateString('nl-NL', { month: 'long', year: 'numeric' });
