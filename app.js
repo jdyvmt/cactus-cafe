@@ -579,7 +579,7 @@ const UI = {
                     </div>
                     <div class="form-group">
                         <label>Percentage (%)</label>
-                        <input type="number" step="0.5" min="0" class="bonus-percentage-${index}" value="${Number(bonus.percentage || 0)}">
+                        <input type="number" step="0.01" min="0" class="bonus-percentage-${index}" value="${Number(bonus.percentage || 0).toFixed(2)}">
                     </div>
                     <div class="form-group">
                         <label>Vanaf hoe laat</label>
