@@ -6,165 +6,166 @@
     <title>Cactus Café - Salaris Tracker</title>
     <link rel="stylesheet" href="styles.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database.js"></script>
 </head>
 <body>
     <div class="container">
         <header>
             <h1>🌵 Cactus Café</h1>
-            <p>Salaris Tracker</p>
+            <p class="subtitle">Salaris Tracker</p>
         </header>
 
-        <nav class="nav-tabs">
-            <button class="nav-btn active" data-tab="dashboard">Dashboard</button>
-            <button class="nav-btn" data-tab="logwork">Werkdagen</button>
-            <button class="nav-btn" data-tab="report">Rapport</button>
-            <button class="nav-btn" data-tab="settings">Instellingen</button>
+        <nav class="navbar">
+            <button class="nav-btn active" data-tab="dashboard">📊 Dashboard</button>
+            <button class="nav-btn" data-tab="logwork">📝 Werkdagen</button>
+            <button class="nav-btn" data-tab="settings">⚙️ Instellingen</button>
+            <button class="nav-btn" data-tab="report">📈 Rapportage</button>
         </nav>
 
-        <!-- Dashboard Tab -->
-        <div id="dashboard" class="tab-content active">
-            <div class="stats-container">
-                <div class="stat-card">
-                    <h3>Verdiensten deze maand</h3>
-                    <div class="stat-value" id="currentMonthEarnings">€ 0.00</div>
+        <div class="toolbar">
+            <button class="btn btn-secondary" id="exportDataBtn">Exporteren</button>
+            <label class="btn btn-secondary upload-btn">
+                <input type="file" id="importFileInput" accept=".json" hidden>
+                Importeren
+            </label>
+        </div>
+
+        <section id="dashboard" class="tab-content active">
+            <h2>Dashboard</h2>
+            <div class="dashboard-grid">
+                <div class="card">
+                    <h3>Deze Maand</h3>
+                    <p class="amount" id="currentMonthEarnings">€ 0,00</p>
+                    <p class="subtitle">Totale verdiensten</p>
                 </div>
-                <div class="stat-card">
+                <div class="card">
                     <h3>Werkdagen</h3>
-                    <div class="stat-value" id="currentMonthDays">0</div>
+                    <p class="amount" id="currentMonthDays">0</p>
+                    <p class="subtitle">Aantal dagen gewerkt</p>
                 </div>
-                <div class="stat-card">
-                    <h3>Gemiddeld per dag</h3>
-                    <div class="stat-value" id="averagePerDay">€ 0.00</div>
+                <div class="card">
+                    <h3>Gemiddelde per Dag</h3>
+                    <p class="amount" id="averagePerDay">€ 0,00</p>
+                    <p class="subtitle">Gemiddeld verdienste</p>
                 </div>
-                <div class="stat-card">
-                    <h3>Vorig jaar dezelfde maand</h3>
-                    <div class="stat-value" id="previousMonthEarnings">€ 0.00</div>
+                <div class="card">
+                    <h3>Zelfde Maand Vorig Jaar</h3>
+                    <p class="amount" id="previousMonthEarnings">€ 0,00</p>
+                    <p class="subtitle">Vergelijking met vorig jaar</p>
                 </div>
             </div>
 
             <div class="chart-container">
+                <h3>Verdiensten Deze Maand</h3>
                 <canvas id="monthChart"></canvas>
             </div>
 
-            <div class="recent-container">
+            <div class="recent-entries">
                 <h3>Recente Ingaven</h3>
                 <div id="recentList"></div>
             </div>
-        </div>
+        </section>
 
-        <!-- Log Work Tab -->
-        <div id="logwork" class="tab-content">
-            <div class="form-section">
-                <h2>Werkdag registreren</h2>
+        <section id="logwork" class="tab-content">
+            <h2>Werkdag Registreren</h2>
+            <div class="form-container">
                 <form id="logWorkForm">
                     <div class="form-group">
-                        <label for="workDate">Datum</label>
+                        <label for="workDate">Datum:</label>
                         <input type="date" id="workDate" required>
                     </div>
+
                     <div class="form-group">
-                        <label for="startTime">Starttijd</label>
+                        <label for="startTime">Starttijd:</label>
                         <input type="time" id="startTime" required>
                     </div>
+
                     <div class="form-group">
-                        <label for="endTime">Eindtijd</label>
+                        <label for="endTime">Eindtijd:</label>
                         <input type="time" id="endTime" required>
                     </div>
+
                     <div class="form-group">
-                        <label for="notes">Notities</label>
-                        <textarea id="notes" placeholder="Optionele opmerkingen"></textarea>
+                        <label for="notes">Notities (optioneel):</label>
+                        <textarea id="notes" placeholder="Bijzonderheden..."></textarea>
                     </div>
+
                     <button type="submit" class="btn btn-primary">Opslaan</button>
                 </form>
             </div>
 
-            <div class="entries-section">
-                <h2>Alle Werkdagen</h2>
+            <div class="entries-list">
+                <h3>Alle Ingaven</h3>
                 <div id="allEntries"></div>
             </div>
-        </div>
+        </section>
 
-        <!-- Report Tab -->
-        <div id="report" class="tab-content">
-            <div class="form-section">
-                <h2>Rapport Genereren</h2>
-                <div class="form-group">
-                    <label for="reportMonth">Selecteer maand</label>
-                    <input type="month" id="reportMonth">
-                </div>
-                <button class="btn btn-primary" id="generateReportBtn">Rapport Genereren</button>
+        <section id="settings" class="tab-content">
+            <h2>Instellingen</h2>
+            <div class="form-container">
+                <form id="settingsForm">
+                    <div class="history-panel">
+                        <h3>Uurloon historie</h3>
+                        <div id="hourlyRateHistory"></div>
+                        <button type="button" class="btn btn-secondary" id="addRateHistoryBtn">+ Loonregel Toevoegen</button>
+                    </div>
+
+                    <div class="history-panel" style="margin-top: 2rem;">
+                        <h3>Fietsvergoeding historie</h3>
+                        <div id="bikeAllowanceHistory"></div>
+                        <button type="button" class="btn btn-secondary" id="addBikeAllowanceBtn">+ Vergoeding Toevoegen</button>
+                    </div>
+
+                    <div class="history-panel" style="margin-top: 2rem;">
+                        <h3>Toeslagen</h3>
+                        <div id="bonusList"></div>
+                        <button type="button" class="btn btn-secondary" id="addBonusBtn">+ Toeslag Toevoegen</button>
+                    </div>
+
+                    <div class="cloud-config" style="margin-top: 2rem;">
+                        <h3>Cloud sync (optioneel)</h3>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="cloudApiKey">Firebase API Key</label>
+                                <input type="text" id="cloudApiKey" placeholder="AIza..."></div>
+                            <div class="form-group">
+                                <label for="cloudAuthDomain">Auth Domain</label>
+                                <input type="text" id="cloudAuthDomain" placeholder="project-id.firebaseapp.com">
+                            </div>
+                            <div class="form-group">
+                                <label for="cloudProjectId">Project ID</label>
+                                <input type="text" id="cloudProjectId" placeholder="project-id">
+                            </div>
+                            <div class="form-group">
+                                <label for="cloudDatabaseURL">Database URL</label>
+                                <input type="text" id="cloudDatabaseURL" placeholder="https://project-id-default-rtdb.firebaseio.com">
+                            </div>
+                        </div>
+                        <div class="button-stack">
+                            <button type="button" class="btn btn-secondary" id="saveCloudConfigBtn">Cloud config opslaan</button>
+                            <button type="button" class="btn btn-primary" id="syncToCloudBtn">Sync naar cloud</button>
+                            <button type="button" class="btn btn-secondary" id="loadFromCloudBtn">Laad van cloud</button>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary" style="margin-top: 2rem;">Instellingen Opslaan</button>
+                </form>
+            </div>
+        </section>
+
+        <section id="report" class="tab-content">
+            <h2>Rapportage</h2>
+            <div class="report-selector">
+                <label for="reportMonth">Kies maand:</label>
+                <input type="month" id="reportMonth">
+                <button class="btn btn-secondary" id="generateReportBtn">Genereer Rapport</button>
             </div>
 
             <div id="reportContent"></div>
-        </div>
-
-        <!-- Settings Tab -->
-        <div id="settings" class="tab-content">
-            <div class="settings-section">
-                <h2>Instellingen</h2>
-                <form id="settingsForm">
-                    <!-- Hourly Rates -->
-                    <fieldset>
-                        <legend>Uurtarieven</legend>
-                        <div id="hourlyRateHistory"></div>
-                        <button type="button" class="btn btn-secondary" id="addRateHistoryBtn">+ Toevoegen</button>
-                    </fieldset>
-
-                    <!-- Bike Allowance -->
-                    <fieldset>
-                        <legend>Fietsvergoeding</legend>
-                        <div id="bikeAllowanceHistory"></div>
-                        <button type="button" class="btn btn-secondary" id="addBikeAllowanceBtn">+ Toevoegen</button>
-                    </fieldset>
-
-                    <!-- Bonuses -->
-                    <fieldset>
-                        <legend>Toeslagen</legend>
-                        <div id="bonusList"></div>
-                        <button type="button" class="btn btn-secondary" id="addBonusBtn">+ Toeslag Toevoegen</button>
-                    </fieldset>
-
-                    <button type="submit" class="btn btn-primary">Instellingen Opslaan</button>
-                </form>
-
-                <!-- Export/Import -->
-                <fieldset>
-                    <legend>Data Beheer</legend>
-                    <button type="button" class="btn btn-secondary" id="exportDataBtn">📥 Exporteren</button>
-                    <label class="btn btn-secondary">
-                        📤 Importeren
-                        <input type="file" id="importFileInput" accept=".json" style="display: none;">
-                    </label>
-                </fieldset>
-
-                <!-- Cloud Sync -->
-                <fieldset>
-                    <legend>Cloud Synchronisatie (Firebase)</legend>
-                    <div class="form-group">
-                        <label for="cloudApiKey">API Key</label>
-                        <input type="text" id="cloudApiKey" placeholder="Je Firebase API Key">
-                    </div>
-                    <div class="form-group">
-                        <label for="cloudAuthDomain">Auth Domain</label>
-                        <input type="text" id="cloudAuthDomain" placeholder="project.firebaseapp.com">
-                    </div>
-                    <div class="form-group">
-                        <label for="cloudProjectId">Project ID</label>
-                        <input type="text" id="cloudProjectId" placeholder="project-id">
-                    </div>
-                    <div class="form-group">
-                        <label for="cloudDatabaseURL">Database URL</label>
-                        <input type="text" id="cloudDatabaseURL" placeholder="https://project.firebasedatabase.app">
-                    </div>
-                    <button type="button" class="btn btn-secondary" id="saveCloudConfigBtn">Cloud Config Opslaan</button>
-                    <button type="button" class="btn btn-secondary" id="syncToCloudBtn">☁️ Naar Cloud Uploaden</button>
-                    <button type="button" class="btn btn-secondary" id="loadFromCloudBtn">☁️ Van Cloud Laden</button>
-                </fieldset>
-            </div>
-        </div>
+        </section>
     </div>
 
-    <script src="index.html"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+    <script src="app.js"></script>
 </body>
 </html>
