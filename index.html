@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cactus Café - Salary Tracker</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🌵 Cactus Café</h1>
+            <p class="subtitle">Flexijob Salary Tracker</p>
+        </header>
+
+        <nav class="navbar">
+            <button class="nav-btn active" data-tab="dashboard">📊 Dashboard</button>
+            <button class="nav-btn" data-tab="logwork">📝 Werkdagen</button>
+            <button class="nav-btn" data-tab="settings">⚙️ Instellingen</button>
+            <button class="nav-btn" data-tab="report">📈 Rapportage</button>
+        </nav>
+
+        <!-- DASHBOARD -->
+        <section id="dashboard" class="tab-content active">
+            <h2>Dashboard</h2>
+            <div class="dashboard-grid">
+                <div class="card">
+                    <h3>Deze Maand</h3>
+                    <p class="amount" id="currentMonthEarnings">€ 0,00</p>
+                    <p class="subtitle">Totale verdiensten</p>
+                </div>
+                <div class="card">
+                    <h3>Werkdagen</h3>
+                    <p class="amount" id="currentMonthDays">0</p>
+                    <p class="subtitle">Aantal dagen gewerkt</p>
+                </div>
+                <div class="card">
+                    <h3>Gemiddelde per Dag</h3>
+                    <p class="amount" id="averagePerDay">€ 0,00</p>
+                    <p class="subtitle">Gemiddeld verdienste</p>
+                </div>
+                <div class="card">
+                    <h3>Vorige Maand</h3>
+                    <p class="amount" id="previousMonthEarnings">€ 0,00</p>
+                    <p class="subtitle">Vorige maand totaal</p>
+                </div>
+            </div>
+
+            <div class="chart-container">
+                <h3>Verdiensten Deze Maand</h3>
+                <canvas id="monthChart"></canvas>
+            </div>
+
+            <div class="recent-entries">
+                <h3>Recente Ingaven</h3>
+                <div id="recentList"></div>
+            </div>
+        </section>
+
+        <!-- LOG WORK -->
+        <section id="logwork" class="tab-content">
+            <h2>Werkdag Registreren</h2>
+            <div class="form-container">
+                <form id="logWorkForm">
+                    <div class="form-group">
+                        <label for="workDate">Datum:</label>
+                        <input type="date" id="workDate" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="startTime">Starttijd:</label>
+                        <input type="time" id="startTime" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="endTime">Eindtijd:</label>
+                        <input type="time" id="endTime" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="notes">Notities (optioneel):</label>
+                        <textarea id="notes" placeholder="Bijzonderheden..."></textarea>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary">Opslaan</button>
+                </form>
+            </div>
+
+            <div class="entries-list">
+                <h3>Alle Ingaven</h3>
+                <div id="allEntries"></div>
+            </div>
+        </section>
+
+        <!-- SETTINGS -->
+        <section id="settings" class="tab-content">
+            <h2>Instellingen</h2>
+            <div class="form-container">
+                <h3>Basis Loongegevens</h3>
+                <form id="settingsForm">
+                    <div class="form-group">
+                        <label for="hourlyRate">Uurloon (bruto €):</label>
+                        <input type="number" id="hourlyRate" step="0.01" min="0" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="bikeAllowance">Fietsvergoeding per dag (€):</label>
+                        <input type="number" id="bikeAllowance" step="0.01" min="0">
+                    </div>
+
+                    <h4 style="margin-top: 2rem;">Toeslagen</h4>
+                    <p class="subtitle">Voeg hier toeslagen toe (nachtwerk, zondagwerk, enz.)</p>
+
+                    <div id="bonusList"></div>
+                    <button type="button" class="btn btn-secondary" id="addBonusBtn">+ Toeslag Toevoegen</button>
+
+                    <button type="submit" class="btn btn-primary" style="margin-top: 2rem;">Instellingen Opslaan</button>
+                </form>
+            </div>
+        </section>
+
+        <!-- REPORT -->
+        <section id="report" class="tab-content">
+            <h2>Rapportage</h2>
+            <div class="report-selector">
+                <label for="reportMonth">Kies maand:</label>
+                <input type="month" id="reportMonth">
+                <button class="btn btn-secondary" id="generateReportBtn">Genereer Rapport</button>
+            </div>
+
+            <div id="reportContent"></div>
+        </section>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
