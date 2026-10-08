@@ -1,33 +1,35 @@
 const generateId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-const getDefaultSettings = () => ({
-    hourlyRates: [{
-        id: generateId(),
-        amount: 12.50,
-        validFrom: getIsoDate(new Date())
-    }],
-    bikeAllowances: [{
-        id: generateId(),
-        amount: 0.50,
-        validFrom: getIsoDate(new Date())
-    }],
-    bonuses: [{
-        id: generateId(),
-        name: 'Nachtwerk',
-        percentage: 20,
-        validFrom: getIsoDate(new Date()),
-        startHour: 22,
-        endHour: 6,
-        days: [0,1,2,3,4,5,6]
-    }]
-});
-
 function getIsoDate(date) {
     if (!date) return '';
     const d = new Date(date);
     const offset = d.getTimezoneOffset();
     const local = new Date(d.getTime() - offset * 60000);
     return local.toISOString().split('T')[0];
+}
+
+function getDefaultSettings() {
+    return {
+        hourlyRates: [{
+            id: generateId(),
+            amount: 12.50,
+            validFrom: getIsoDate(new Date())
+        }],
+        bikeAllowances: [{
+            id: generateId(),
+            amount: 0.50,
+            validFrom: getIsoDate(new Date())
+        }],
+        bonuses: [{
+            id: generateId(),
+            name: 'Nachtwerk',
+            percentage: 20,
+            validFrom: getIsoDate(new Date()),
+            startHour: 22,
+            endHour: 6,
+            days: [0, 1, 2, 3, 4, 5, 6]
+        }]
+    };
 }
 
 function getHoursFromTime(timeValue) {
@@ -55,18 +57,14 @@ function sortByValidFrom(items) {
 }
 
 function getEffectiveValue(history, dateValue) {
-    if (!Array.isArray(history) || history.length === 0) {
-        return 0;
-    }
+    if (!Array.isArray(history) || history.length === 0) return 0;
 
     const date = dateValue ? new Date(`${dateValue}T00:00:00`) : new Date();
     let active = null;
 
     sortByValidFrom(history).forEach(item => {
         const validFromDate = new Date(`${item.validFrom || '2000-01-01'}T00:00:00`);
-        if (validFromDate <= date) {
-            active = item;
-        }
+        if (validFromDate <= date) active = item;
     });
 
     if (!active) return 0;
@@ -85,29 +83,7 @@ function getEffectiveBonuses(history, dateValue) {
 const DataManager = {
     STORAGE_KEY_ENTRIES: 'cactus_work_entries',
     STORAGE_KEY_SETTINGS: 'cactus_settings',
-
-    getEntries() {
-        const data = localStorage.getItem(this.STORAGE_KEY_ENTRIES);
-        return data ? JSON.parse(data) : [];
-    },
-
-    saveEntries(entries) {
-        localStorage.setItem(this.STORAGE_KEY_ENTRIES, JSON.stringify(entries));
-    },
-
-    addEntry(entry) {
-        const entries = this.getEntries();
-        entry.id = Date.now().toString();
-        entries.push(entry);
-        this.saveEntries(entries);
-        return entry;
-    },
-
-    deleteEntry(id) {
-        let entries = this.getEntries();
-        entries = entries.filter(e => e.id !== id);
-        this.saveEntries(entries);
-    },
+    STORAGE_KEY_CLOUD: 'cactus_cloud_config',
 
     normalizeSettings(rawSettings) {
         const base = rawSettings || {};
@@ -135,6 +111,29 @@ const DataManager = {
         };
     },
 
+    getEntries() {
+        const data = localStorage.getItem(this.STORAGE_KEY_ENTRIES);
+        return data ? JSON.parse(data) : [];
+    },
+
+    saveEntries(entries) {
+        localStorage.setItem(this.STORAGE_KEY_ENTRIES, JSON.stringify(entries));
+    },
+
+    addEntry(entry) {
+        const entries = this.getEntries();
+        entry.id = Date.now().toString();
+        entries.push(entry);
+        this.saveEntries(entries);
+        return entry;
+    },
+
+    deleteEntry(id) {
+        let entries = this.getEntries();
+        entries = entries.filter(e => e.id !== id);
+        this.saveEntries(entries);
+    },
+
     getSettings() {
         const data = localStorage.getItem(this.STORAGE_KEY_SETTINGS);
         const parsed = data ? JSON.parse(data) : getDefaultSettings();
@@ -143,6 +142,170 @@ const DataManager = {
 
     saveSettings(settings) {
         localStorage.setItem(this.STORAGE_KEY_SETTINGS, JSON.stringify(settings));
+    },
+
+    getCloudConfig() {
+        const data = localStorage.getItem(this.STORAGE_KEY_CLOUD);
+        return data ? JSON.parse(data) : {
+            apiKey: '',
+            authDomain: '',
+            projectId: '',
+            databaseURL: ''
+        };
+    },
+
+    saveCloudConfig(config) {
+        localStorage.setItem(this.STORAGE_KEY_CLOUD, JSON.stringify(config));
+    },
+
+    exportData() {
+        return {
+            exportedAt: new Date().toISOString(),
+            version: 1,
+            entries: this.getEntries(),
+            settings: this.getSettings(),
+            cloudConfig: this.getCloudConfig()
+        };
+    },
+
+    importData(payload) {
+        if (!payload || typeof payload !== 'object') {
+            throw new Error('Ongeldig exportbestand');
+        }
+
+        if (Array.isArray(payload.entries)) {
+            this.saveEntries(payload.entries);
+        }
+
+        if (payload.settings) {
+            this.saveSettings(this.normalizeSettings(payload.settings));
+        }
+
+        if (payload.cloudConfig) {
+            this.saveCloudConfig(payload.cloudConfig);
+        }
+    }
+};
+
+const ExportImport = {
+    downloadJson(filename, data) {
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+    },
+
+    exportData() {
+        const payload = DataManager.exportData();
+        this.downloadJson('cactus-cafe-export.json', payload);
+        alert('Gegevens geëxporteerd.');
+    },
+
+    importFile(file) {
+        if (!file) return;
+        const reader = new FileReader();
+
+        reader.onload = (event) => {
+            try {
+                const payload = JSON.parse(event.target.result);
+                DataManager.importData(payload);
+                UI.renderSettings();
+                UI.renderDashboard();
+                UI.renderAllEntries();
+                alert('Gegevens geïmporteerd.');
+            } catch (error) {
+                alert('Import mislukt. Controleer het bestand.');
+                console.error(error);
+            }
+        };
+
+        reader.readAsText(file);
+    }
+};
+
+const CloudSync = {
+    app: null,
+    db: null,
+
+    getConfig() {
+        return DataManager.getCloudConfig();
+    },
+
+    isConfigured() {
+        const config = this.getConfig();
+        return !!(config.apiKey && config.authDomain && config.projectId && config.databaseURL);
+    },
+
+    ensureReady() {
+        if (!this.isConfigured()) {
+            return false;
+        }
+
+        if (!window.firebase) {
+            alert('Firebase SDK niet geladen.');
+            return false;
+        }
+
+        if (!this.app) {
+            const config = this.getConfig();
+            this.app = firebase.apps.length ? firebase.app() : firebase.initializeApp({
+                apiKey: config.apiKey,
+                authDomain: config.authDomain,
+                projectId: config.projectId,
+                databaseURL: config.databaseURL
+            });
+            this.db = firebase.database(this.app);
+        }
+
+        return true;
+    },
+
+    async saveToCloud() {
+        if (!this.ensureReady()) {
+            alert('Vul eerst je Firebase-configuratie in bij Instellingen.');
+            return;
+        }
+
+        try {
+            const ref = this.db.ref('cactusCafe');
+            await ref.set(DataManager.exportData());
+            alert('Data succesvol naar Firebase geupload.');
+        } catch (error) {
+            console.error(error);
+            alert('Upload naar Firebase mislukt.');
+        }
+    },
+
+    async loadFromCloud() {
+        if (!this.ensureReady()) {
+            alert('Vul eerst je Firebase-configuratie in bij Instellingen.');
+            return;
+        }
+
+        try {
+            const ref = this.db.ref('cactusCafe');
+            const snapshot = await ref.once('value');
+            const payload = snapshot.val();
+
+            if (!payload) {
+                alert('Er staat nog geen data in Firebase.');
+                return;
+            }
+
+            DataManager.importData(payload);
+            UI.renderSettings();
+            UI.renderDashboard();
+            UI.renderAllEntries();
+            alert('Data succesvol van Firebase geladen.');
+        } catch (error) {
+            console.error(error);
+            alert('Ophalen van Firebase mislukt.');
+        }
     }
 };
 
@@ -151,26 +314,32 @@ const Calculator = {
         const start = getMinutesFromTime(entry.startTime);
         let end = getMinutesFromTime(entry.endTime);
 
-        if (end <= start) {
-            end += 24 * 60;
-        }
+        if (end <= start) end += 24 * 60;
 
         return (end - start) / 60;
     },
 
+    getEffectiveHourlyRate(dateValue, settings) {
+        return getEffectiveValue(settings.hourlyRates, dateValue);
+    },
+
+    getEffectiveBikeAllowance(dateValue, settings) {
+        return getEffectiveValue(settings.bikeAllowances, dateValue);
+    },
+
     calculateEarnings(entry, settings) {
         const workDate = entry.date;
-        const hourlyRate = getEffectiveValue(settings.hourlyRates, workDate);
-        const bikeAllowance = getEffectiveValue(settings.bikeAllowances, workDate);
+        const hourlyRate = this.getEffectiveHourlyRate(workDate, settings);
+        const bikeAllowance = this.getEffectiveBikeAllowance(workDate, settings);
         const hours = this.getShiftHours(entry);
+        const dayOfWeek = new Date(`${workDate}T00:00:00`).getDay();
 
         let baseEarnings = hours * hourlyRate;
         let bonusEarnings = 0;
 
-        const effectiveBonuses = getEffectiveBonuses(settings.bonuses, workDate);
-        const dayOfWeek = new Date(`${workDate}T00:00:00`).getDay();
+        const bonuses = getEffectiveBonuses(settings.bonuses, workDate);
 
-        effectiveBonuses.forEach(bonus => {
+        bonuses.forEach(bonus => {
             if (!this.bonusAppliesToDay(bonus, dayOfWeek)) return;
             const bonusHours = this.calculateBonusHours(entry, bonus);
             if (bonusHours <= 0) return;
@@ -187,28 +356,24 @@ const Calculator = {
     },
 
     calculateBonusHours(entry, bonus) {
+        if (!bonus || bonus.percentage === undefined || bonus.percentage === null) return 0;
+
         const shiftStart = getMinutesFromTime(entry.startTime);
         let shiftEnd = getMinutesFromTime(entry.endTime);
-        if (shiftEnd <= shiftStart) {
-            shiftEnd += 24 * 60;
-        }
+        if (shiftEnd <= shiftStart) shiftEnd += 24 * 60;
 
         if (bonus.startHour === undefined || bonus.endHour === undefined || bonus.startHour === '' || bonus.endHour === '') {
             return this.getShiftHours(entry);
         }
 
-        const startHour = Number(bonus.startHour);
-        const endHour = Number(bonus.endHour);
+        let bonusStart = Number(bonus.startHour) * 60;
+        let bonusEnd = Number(bonus.endHour) * 60;
 
-        let bonusStart = startHour * 60;
-        let bonusEnd = endHour * 60;
-
-        if (bonusEnd <= bonusStart) {
-            bonusEnd += 24 * 60;
-        }
+        if (bonusEnd <= bonusStart) bonusEnd += 24 * 60;
 
         const overlapStart = Math.max(shiftStart, bonusStart);
         const overlapEnd = Math.min(shiftEnd, bonusEnd);
+
         return Math.max(0, (overlapEnd - overlapStart) / 60);
     },
 
@@ -240,14 +405,25 @@ const UI = {
         document.getElementById('addBikeAllowanceBtn').addEventListener('click', () => this.addBikeAllowanceRow());
         document.getElementById('addBonusBtn').addEventListener('click', () => this.addBonusField());
         document.getElementById('generateReportBtn').addEventListener('click', () => this.generateReport());
+        document.getElementById('exportDataBtn').addEventListener('click', () => ExportImport.exportData());
+        document.getElementById('importFileInput').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) ExportImport.importFile(file);
+            e.target.value = '';
+        });
+        document.getElementById('saveCloudConfigBtn').addEventListener('click', () => this.saveCloudConfig());
+        document.getElementById('syncToCloudBtn').addEventListener('click', () => CloudSync.saveToCloud());
+        document.getElementById('loadFromCloudBtn').addEventListener('click', () => CloudSync.loadFromCloud());
     },
 
     switchTab(tabName) {
         document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
         document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
 
-        document.getElementById(tabName).classList.add('active');
-        document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+        const tab = document.getElementById(tabName);
+        if (tab) tab.classList.add('active');
+        const btn = document.querySelector(`[data-tab="${tabName}"]`);
+        if (btn) btn.classList.add('active');
 
         if (tabName === 'dashboard') this.renderDashboard();
         if (tabName === 'logwork') this.renderAllEntries();
@@ -257,6 +433,25 @@ const UI = {
         const today = getIsoDate(new Date());
         document.getElementById('workDate').value = today;
         document.getElementById('reportMonth').value = today.slice(0, 7);
+    },
+
+    saveCloudConfig() {
+        const config = {
+            apiKey: document.getElementById('cloudApiKey').value.trim(),
+            authDomain: document.getElementById('cloudAuthDomain').value.trim(),
+            projectId: document.getElementById('cloudProjectId').value.trim(),
+            databaseURL: document.getElementById('cloudDatabaseURL').value.trim()
+        };
+        DataManager.saveCloudConfig(config);
+        alert('Cloud-configuratie opgeslagen.');
+    },
+
+    loadCloudConfig() {
+        const config = DataManager.getCloudConfig();
+        document.getElementById('cloudApiKey').value = config.apiKey || '';
+        document.getElementById('cloudAuthDomain').value = config.authDomain || '';
+        document.getElementById('cloudProjectId').value = config.projectId || '';
+        document.getElementById('cloudDatabaseURL').value = config.databaseURL || '';
     },
 
     handleLogWork(e) {
@@ -286,28 +481,25 @@ const UI = {
         const entries = DataManager.getEntries();
         const settings = DataManager.getSettings();
         const now = new Date();
-        const currentMonth = now.getMonth();
-        const currentYear = now.getFullYear();
 
         const currentMonthEntries = entries.filter(e => {
             const date = new Date(`${e.date}T00:00:00`);
-            return date.getMonth() === currentMonth && date.getFullYear() === currentYear;
+            return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
         });
 
         const sameMonthLastYearEntries = entries.filter(e => {
             const date = new Date(`${e.date}T00:00:00`);
-            return date.getMonth() === currentMonth && date.getFullYear() === currentYear - 1;
+            return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear() - 1;
         });
 
         const totalCurrent = currentMonthEntries.reduce((sum, e) => sum + Calculator.calculateEarnings(e, settings).total, 0);
         const totalLastYear = sameMonthLastYearEntries.reduce((sum, e) => sum + Calculator.calculateEarnings(e, settings).total, 0);
-        const averagePerDay = currentMonthEntries.length ? totalCurrent / currentMonthEntries.length : 0;
+        const avgPerDay = currentMonthEntries.length ? totalCurrent / currentMonthEntries.length : 0;
 
         document.getElementById('currentMonthEarnings').textContent = `€ ${totalCurrent.toFixed(2)}`;
         document.getElementById('currentMonthDays').textContent = currentMonthEntries.length;
-        document.getElementById('averagePerDay').textContent = `€ ${averagePerDay.toFixed(2)}`;
+        document.getElementById('averagePerDay').textContent = `€ ${avgPerDay.toFixed(2)}`;
         document.getElementById('previousMonthEarnings').textContent = `€ ${totalLastYear.toFixed(2)}`;
-        document.querySelector('#dashboard .card:nth-child(4) h3').textContent = 'Zelfde Maand Vorig Jaar';
 
         this.renderChart(currentMonthEntries, settings);
         this.renderRecentEntries(currentMonthEntries, settings);
@@ -327,9 +519,7 @@ const UI = {
         const labels = Object.keys(byDay).sort((a, b) => new Date(a) - new Date(b));
         const data = labels.map(label => byDay[label]);
 
-        if (window.monthChartInstance) {
-            window.monthChartInstance.destroy();
-        }
+        if (window.monthChartInstance) window.monthChartInstance.destroy();
 
         window.monthChartInstance = new Chart(ctx, {
             type: 'bar',
@@ -345,11 +535,12 @@ const UI = {
             },
             options: {
                 responsive: true,
-                plugins: {
-                    legend: { display: true, position: 'top' }
-                },
+                plugins: { legend: { display: true, position: 'top' } },
                 scales: {
-                    y: { beginAtZero: true, title: { display: true, text: 'Verdiensten (€)' } }
+                    y: {
+                        beginAtZero: true,
+                        title: { display: true, text: 'Verdiensten (€)' }
+                    }
                 }
             }
         });
@@ -385,7 +576,6 @@ const UI = {
         const entries = DataManager.getEntries();
         const settings = DataManager.getSettings();
         const allEntriesDiv = document.getElementById('allEntries');
-
         if (!allEntriesDiv) return;
 
         if (!entries.length) {
@@ -426,15 +616,7 @@ const UI = {
 
     renderSettings() {
         const settings = DataManager.getSettings();
-        const latestRate = settings.hourlyRates.length ? sortByValidFrom(settings.hourlyRates).at(-1) : { amount: 0 };
-        const latestBike = settings.bikeAllowances.length ? sortByValidFrom(settings.bikeAllowances).at(-1) : { amount: 0 };
-
-        const hourlyRateInput = document.getElementById('hourlyRate');
-        const bikeInput = document.getElementById('bikeAllowance');
-
-        if (hourlyRateInput) hourlyRateInput.value = Number(latestRate.amount || 0);
-        if (bikeInput) bikeInput.value = Number(latestBike.amount || 0);
-
+        this.loadCloudConfig();
         this.renderRateHistory(settings.hourlyRates || []);
         this.renderBikeAllowanceHistory(settings.bikeAllowances || []);
         this.renderBonuses(settings.bonuses || []);
@@ -444,11 +626,9 @@ const UI = {
         const container = document.getElementById('hourlyRateHistory');
         if (!container) return;
 
-        if (!history.length) {
-            history = [{ id: generateId(), amount: 0, validFrom: getIsoDate(new Date()) }];
-        }
+        const rates = history.length ? sortByValidFrom(history) : [{ id: generateId(), amount: 0, validFrom: getIsoDate(new Date()) }];
 
-        container.innerHTML = sortByValidFrom(history).map((rate, index) => `
+        container.innerHTML = rates.map((rate, index) => `
             <div class="history-item">
                 <div class="history-fields">
                     <div class="form-group">
@@ -469,11 +649,9 @@ const UI = {
         const container = document.getElementById('bikeAllowanceHistory');
         if (!container) return;
 
-        if (!history.length) {
-            history = [{ id: generateId(), amount: 0, validFrom: getIsoDate(new Date()) }];
-        }
+        const values = history.length ? sortByValidFrom(history) : [{ id: generateId(), amount: 0, validFrom: getIsoDate(new Date()) }];
 
-        container.innerHTML = sortByValidFrom(history).map((item, index) => `
+        container.innerHTML = values.map((item, index) => `
             <div class="history-item">
                 <div class="history-fields">
                     <div class="form-group">
@@ -493,9 +671,7 @@ const UI = {
     addRateHistoryRow() {
         const container = document.getElementById('hourlyRateHistory');
         if (!container) return;
-
-        const entries = Array.from(container.querySelectorAll('.history-item'));
-        const nextIndex = entries.length;
+        const nextIndex = container.querySelectorAll('.history-item').length;
         const today = getIsoDate(new Date());
 
         container.insertAdjacentHTML('beforeend', `
@@ -518,9 +694,7 @@ const UI = {
     addBikeAllowanceRow() {
         const container = document.getElementById('bikeAllowanceHistory');
         if (!container) return;
-
-        const entries = Array.from(container.querySelectorAll('.history-item'));
-        const nextIndex = entries.length;
+        const nextIndex = container.querySelectorAll('.history-item').length;
         const today = getIsoDate(new Date());
 
         container.insertAdjacentHTML('beforeend', `
@@ -567,7 +741,11 @@ const UI = {
 
         return `
             <div class="bonus-item">
-                <h4>Toeslag ${index + 1}</h4>
+                <div class="bonus-header-row">
+                    <h4>Toeslag ${index + 1}</h4>
+                    <button type="button" class="btn btn-danger btn-small" onclick="UI.removeBonusField(${index})">Verwijder</button>
+                </div>
+
                 <div class="bonus-row">
                     <div class="form-group">
                         <label>Naam</label>
@@ -590,6 +768,7 @@ const UI = {
                         <input type="number" min="0" max="23" class="bonus-end-${index}" value="${bonus.endHour ?? ''}" placeholder="(optioneel)">
                     </div>
                 </div>
+
                 <div class="bonus-row-checkboxes">
                     ${days.map((day, dayIndex) => `
                         <label class="checkbox-inline">
@@ -598,7 +777,6 @@ const UI = {
                         </label>
                     `).join('')}
                 </div>
-                <button type="button" class="btn btn-danger btn-small" onclick="UI.removeBonusField(${index})">Verwijder</button>
             </div>
         `;
     },
@@ -613,7 +791,7 @@ const UI = {
             validFrom: getIsoDate(new Date()),
             startHour: '',
             endHour: '',
-            days: [0,1,2,3,4,5,6]
+            days: [0, 1, 2, 3, 4, 5, 6]
         }, newIndex));
     },
 
@@ -686,8 +864,8 @@ const UI = {
         });
 
         const settings = {
-            hourlyRates: hourlyRates.length ? hourlyRates : [{ id: generateId(), amount: Number(document.getElementById('hourlyRate').value) || 0, validFrom: getIsoDate(new Date()) }],
-            bikeAllowances: bikeAllowances.length ? bikeAllowances : [{ id: generateId(), amount: Number(document.getElementById('bikeAllowance').value) || 0, validFrom: getIsoDate(new Date()) }],
+            hourlyRates: hourlyRates.length ? hourlyRates : [{ id: generateId(), amount: 0, validFrom: getIsoDate(new Date()) }],
+            bikeAllowances: bikeAllowances.length ? bikeAllowances : [{ id: generateId(), amount: 0, validFrom: getIsoDate(new Date()) }],
             bonuses
         };
 
@@ -801,6 +979,8 @@ document.addEventListener('DOMContentLoaded', () => {
 window.UI = UI;
 window.Calculator = Calculator;
 window.DataManager = DataManager;
+window.ExportImport = ExportImport;
+window.CloudSync = CloudSync;
 window.getDefaultSettings = getDefaultSettings;
 window.getIsoDate = getIsoDate;
 window.getEffectiveValue = getEffectiveValue;
