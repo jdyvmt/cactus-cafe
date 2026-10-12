@@ -52,6 +52,11 @@
                     <p class="amount" id="previousMonthEarnings">€ 0,00</p>
                     <p class="subtitle">Vergelijking met vorig jaar</p>
                 </div>
+                <div class="card">
+                    <h3>Totaal Alle Jaren</h3>
+                    <p class="amount" id="allYearsEarnings">€ 0,00</p>
+                    <p class="subtitle">Effectief ontvangen totaal</p>
+                </div>
             </div>
 
             <div class="chart-container">
@@ -66,34 +71,39 @@
         </section>
 
         <section id="logwork" class="tab-content">
-            <h2>Werkdag Registreren</h2>
+            <h2>Werkdag(en) Registreren</h2>
             <div class="form-container">
-                <form id="logWorkForm">
+                <form id="bulkWorkForm">
                     <div class="form-group">
-                        <label for="workDate">Datum:</label>
-                        <input type="date" id="workDate" required>
+                        <label for="bulkStartDate">Startdatum (of enkele dag):</label>
+                        <input type="date" id="bulkStartDate" required>
                     </div>
 
                     <div class="form-group">
-                        <label for="startTime">Starttijd:</label>
-                        <input type="time" id="startTime" required>
+                        <label for="bulkDays">Aantal opeenvolgende dagen:</label>
+                        <input type="number" id="bulkDays" min="1" value="1" required>
                     </div>
 
                     <div class="form-group">
-                        <label for="endTime">Eindtijd:</label>
-                        <input type="time" id="endTime" required>
+                        <label for="bulkStartTime">Starttijd:</label>
+                        <input type="time" id="bulkStartTime" required>
                     </div>
 
                     <div class="form-group">
-                        <label for="notes">Notities (optioneel):</label>
-                        <textarea id="notes" placeholder="Bijzonderheden..."></textarea>
+                        <label for="bulkEndTime">Eindtijd:</label>
+                        <input type="time" id="bulkEndTime" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="bulkNotes">Notities (optioneel):</label>
+                        <textarea id="bulkNotes" placeholder="Bijzonderheden..."></textarea>
                     </div>
 
                     <button type="submit" class="btn btn-primary">Opslaan</button>
                 </form>
             </div>
 
-            <div class="entries-list">
+            <div class="entries-list" style="margin-top: 2rem;">
                 <h3>Alle Ingaven</h3>
                 <div id="allEntries"></div>
             </div>
@@ -123,10 +133,14 @@
 
                     <div class="cloud-config" style="margin-top: 2rem;">
                         <h3>Cloud sync (optioneel)</h3>
+                        <p style="font-size: 0.9rem; color: #64748b; margin-bottom: 12px;">
+                            Wil je synchroniseren via Firebase? Maak een gratis project aan op <a href="https://console.firebase.google.com/" target="_blank">Firebase Console</a>, activeer de Realtime Database en vul hieronder je gegevens in.
+                        </p>
                         <div class="form-grid">
                             <div class="form-group">
                                 <label for="cloudApiKey">Firebase API Key</label>
-                                <input type="text" id="cloudApiKey" placeholder="AIza..."></div>
+                                <input type="text" id="cloudApiKey" placeholder="AIza...">
+                            </div>
                             <div class="form-group">
                                 <label for="cloudAuthDomain">Auth Domain</label>
                                 <input type="text" id="cloudAuthDomain" placeholder="project-id.firebaseapp.com">
@@ -154,13 +168,7 @@
 
         <section id="report" class="tab-content">
             <h2>Rapportage</h2>
-            <div class="report-selector">
-                <label for="reportMonth">Kies maand:</label>
-                <input type="month" id="reportMonth">
-                <button class="btn btn-secondary" id="generateReportBtn">Genereer Rapport</button>
-            </div>
-
-            <div id="reportContent"></div>
+            <div id="reportContainer"></div>
         </section>
     </div>
 
