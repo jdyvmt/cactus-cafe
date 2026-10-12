@@ -1,11 +1,9 @@
 function toMinutesFromValue(value) {
     if (value === undefined || value === null || value === '') return null;
-
     if (typeof value === 'string' && value.includes(':')) {
         const [hours, minutes = '0'] = value.split(':');
         return (Number(hours) || 0) * 60 + (Number(minutes) || 0);
     }
-
     const num = Number(value);
     if (!Number.isFinite(num)) return null;
     return num * 60;
@@ -13,22 +11,19 @@ function toMinutesFromValue(value) {
 
 function formatTimeValue(value) {
     if (value === undefined || value === null || value === '') return '';
-
     if (typeof value === 'string' && value.includes(':')) return value;
-
     const num = Number(value);
     if (!Number.isFinite(num)) return '';
-
     const hours = Math.floor(num);
     const minutes = Math.round((num - hours) * 60);
     return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
 }
 
-// Data storage
 const DataManager = {
     STORAGE_KEY_ENTRIES: 'cactus_work_entries',
     STORAGE_KEY_SETTINGS: 'cactus_settings',
     STORAGE_KEY_ACTUALS: 'cactus_actuals',
+    STORAGE_KEY_CLOUD: 'cactus_cloud_config',
 
     getEntries() {
         const data = localStorage.getItem(this.STORAGE_KEY_ENTRIES);
@@ -41,7 +36,7 @@ const DataManager = {
 
     addEntry(entry) {
         const entries = this.getEntries();
-        entry.id = Date.now().toString();
+        entry.id = Date.now().toString() + Math.random().toString(36.substr(2, 5));
         entries.push(entry);
         this.saveEntries(entries);
         return entry;
@@ -87,10 +82,18 @@ const DataManager = {
     getActual(yearMonth) {
         const actuals = this.getActuals();
         return actuals[yearMonth] || null;
+    },
+
+    getCloudConfig() {
+        const data = localStorage.getItem(this.STORAGE_KEY_CLOUD);
+        return data ? JSON.parse(data) : null;
+    },
+
+    saveCloudConfig(config) {
+        localStorage.setItem(this.STORAGE_KEY_CLOUD, JSON.stringify(config));
     }
 };
 
-// Calculator
 const Calculator = {
     calculateEarnings(entry, settings) {
         const start = new Date(`2000-01-01T${entry.startTime}`);
@@ -132,7 +135,6 @@ const Calculator = {
 
     getEffectiveRate(rates, dateValue) {
         if (!Array.isArray(rates) || rates.length === 0) return 0;
-
         const date = new Date(`${dateValue}T00:00:00`);
         let effective = rates[0];
 
@@ -147,9 +149,7 @@ const Calculator = {
     },
 
     calculateBonusPercentage(entry, bonus, hourlyRate, hours, dayOfWeek) {
-        if (!this.bonusAppliesToDay(bonus, dayOfWeek)) {
-            return 0;
-        }
+        if (!this.bonusAppliesToDay(bonus, dayOfWeek)) return 0;
 
         const startMinutes = toMinutesFromValue(entry.startTime);
         const endMinutes = toMinutesFromValue(entry.endTime);
@@ -187,7 +187,6 @@ const Calculator = {
     }
 };
 
-// UI Manager
 const UI = {
     currentReportYear: null,
     currentReportMonth: null,
@@ -198,6 +197,7 @@ const UI = {
         this.renderSettings();
         this.renderDashboard();
         this.renderAllEntries();
+        this.loadCloudFormConfig();
     },
 
     setupEventListeners() {
@@ -205,9 +205,11 @@ const UI = {
             btn.addEventListener('click', (e) => this.switchTab(e.target.dataset.tab));
         });
 
-        document.getElementById('logWorkForm').addEventListener('submit', (e) => this.handleLogWork(e));
-        document.getElementById('bulkWorkForm')?.addEventListener('submit', (e) => this.handleBulkLogWork(e));
-        document.getElementById('settingsForm').addEventListener('submit', (e) => this.handleSettingsSave(e));
+        const bulkForm = document.getElementById('bulkWorkForm');
+        if (bulkForm) bulkForm.addEventListener('submit', (e) => this.handleBulkLogWork(e));
+
+        const settingsForm = document.getElementById('settingsForm');
+        if (settingsForm) settingsForm.addEventListener('submit', (e) => this.handleSettingsSave(e));
 
         const addRateBtn = document.getElementById('addRateHistoryBtn');
         if (addRateBtn) addRateBtn.addEventListener('click', () => this.addRateHistoryRow());
@@ -218,8 +220,14 @@ const UI = {
         const addBonusBtn = document.getElementById('addBonusBtn');
         if (addBonusBtn) addBonusBtn.addEventListener('click', () => this.addBonusField());
 
-        const genReportBtn = document.getElementById('generateReportBtn');
-        if (genReportBtn) genReportBtn.addEventListener('click', () => this.generateReport());
+        const saveCloudBtn = document.getElementById('saveCloudConfigBtn');
+        if (saveCloudBtn) saveCloudBtn.addEventListener('click', () => this.saveCloudConfigFromUI());
+
+        const syncToCloudBtn = document.getElementById('syncToCloudBtn');
+        if (syncToCloudBtn) syncToCloudBtn.addEventListener('click', () => this.syncToCloud());
+
+        const loadFromCloudBtn = document.getElementById('loadFromCloudBtn');
+        if (loadFromCloudBtn) loadFromCloudBtn.addEventListener('click', () => this.loadFromCloud());
     },
 
     switchTab(tabName) {
@@ -240,50 +248,25 @@ const UI = {
 
     setDefaultDate() {
         const today = new Date().toISOString().split('T')[0];
-        const workDate = document.getElementById('workDate');
-        if (workDate) workDate.value = today;
-
         const bulkStartDate = document.getElementById('bulkStartDate');
         if (bulkStartDate) bulkStartDate.value = today;
-    },
-
-    handleLogWork(e) {
-        e.preventDefault();
-
-        const entry = {
-            date: document.getElementById('workDate').value,
-            startTime: document.getElementById('startTime').value,
-            endTime: document.getElementById('endTime').value,
-            notes: document.getElementById('notes').value
-        };
-
-        if (!entry.date || !entry.startTime || !entry.endTime) {
-            alert('Vul alstublieft alle vereiste velden in');
-            return;
-        }
-
-        DataManager.addEntry(entry);
-        alert('Werkdag opgeslagen!');
-        e.target.reset();
-        this.setDefaultDate();
-        this.renderAllEntries();
-        this.renderDashboard();
     },
 
     handleBulkLogWork(e) {
         e.preventDefault();
 
-        const startDate = new Date(document.getElementById('bulkStartDate').value);
-        const entries = [];
+        const startDateVal = document.getElementById('bulkStartDate').value;
         const days = parseInt(document.getElementById('bulkDays').value) || 1;
         const startTime = document.getElementById('bulkStartTime').value;
         const endTime = document.getElementById('bulkEndTime').value;
         const notes = document.getElementById('bulkNotes').value;
 
-        if (!startDate || !startTime || !endTime || days < 1) {
+        if (!startDateVal || !startTime || !endTime || days < 1) {
             alert('Vul alstublieft alle vereiste velden in');
             return;
         }
+
+        const startDate = new Date(`${startDateVal}T00:00:00`);
 
         for (let i = 0; i < days; i++) {
             const currentDate = new Date(startDate);
@@ -297,10 +280,9 @@ const UI = {
                 notes: notes
             };
             DataManager.addEntry(entry);
-            entries.push(entry);
         }
 
-        alert(`${days} werkdagen opgeslagen!`);
+        alert(`${days} werkdag(en) opgeslagen!`);
         e.target.reset();
         this.setDefaultDate();
         this.renderAllEntries();
@@ -310,9 +292,9 @@ const UI = {
     renderDashboard() {
         const entries = DataManager.getEntries();
         const settings = DataManager.getSettings();
+        const actuals = DataManager.getActuals();
         const now = new Date();
 
-        // Current month
         const currentMonthEntries = entries.filter(e => {
             const date = new Date(`${e.date}T00:00:00`);
             return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
@@ -321,15 +303,33 @@ const UI = {
         const totalCurrent = currentMonthEntries.reduce((sum, e) => sum + Calculator.calculateEarnings(e, settings).total, 0);
         const avgPerDay = currentMonthEntries.length ? totalCurrent / currentMonthEntries.length : 0;
 
-        // Previous year same month
         const sameMonthLastYearEntries = entries.filter(e => {
             const date = new Date(`${e.date}T00:00:00`);
             return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear() - 1;
         });
         const totalLastYear = sameMonthLastYearEntries.reduce((sum, e) => sum + Calculator.calculateEarnings(e, settings).total, 0);
 
-        // All years total
-        const allYearsTotal = entries.reduce((sum, e) => sum + Calculator.calculateEarnings(e, settings).total, 0);
+        // Totaal alle jaren op basis van effectief ontvangen (of berekend als er geen effectief bedrag is)
+        let allYearsEffectiveTotal = 0;
+        const years = new Set();
+        entries.forEach(e => years.add(new Date(`${e.date}T00:00:00`).getFullYear()));
+
+        years.forEach(year => {
+            for (let month = 0; month < 12; month++) {
+                const yearMonth = `${year}-${String(month + 1).padStart(2, '0')}`;
+                if (actuals[yearMonth] !== undefined && actuals[yearMonth] !== null) {
+                    allYearsEffectiveTotal += Number(actuals[yearMonth]);
+                } else {
+                    // Fallback naar berekend voor die maand indien geen daadwerkelijk bedrag ingevoerd is
+                    const monthEntries = entries.filter(e => {
+                        const d = new Date(`${e.date}T00:00:00`);
+                        return d.getFullYear() === year && d.getMonth() === month;
+                    });
+                    const mTotal = monthEntries.reduce((sum, e) => sum + Calculator.calculateEarnings(e, settings).total, 0);
+                    allYearsEffectiveTotal += mTotal;
+                }
+            }
+        });
 
         document.getElementById('currentMonthEarnings').textContent = `€ ${totalCurrent.toFixed(2)}`;
         document.getElementById('currentMonthDays').textContent = currentMonthEntries.length;
@@ -337,7 +337,7 @@ const UI = {
         document.getElementById('previousMonthEarnings').textContent = `€ ${totalLastYear.toFixed(2)}`;
         
         const allYearsEl = document.getElementById('allYearsEarnings');
-        if (allYearsEl) allYearsEl.textContent = `€ ${allYearsTotal.toFixed(2)}`;
+        if (allYearsEl) allYearsEl.textContent = `€ ${allYearsEffectiveTotal.toFixed(2)}`;
 
         this.renderChart(currentMonthEntries, settings);
         this.renderRecentEntries(currentMonthEntries, settings);
@@ -367,28 +367,15 @@ const UI = {
                 datasets: [{
                     label: 'Verdiensten (€)',
                     data,
-                    backgroundColor: '#2ecc71',
-                    borderColor: '#27ae60',
+                    backgroundColor: '#2bb673',
+                    borderColor: '#1f9e5e',
                     borderWidth: 2
                 }]
             },
             options: {
                 responsive: true,
-                plugins: {
-                    legend: {
-                        display: true,
-                        position: 'top'
-                    }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        title: {
-                            display: true,
-                            text: 'Verdiensten (€)'
-                        }
-                    }
-                }
+                plugins: { legend: { display: true, position: 'top' } },
+                scales: { y: { beginAtZero: true, title: { display: true, text: 'Verdiensten (€)' } } }
             }
         });
     },
@@ -470,7 +457,6 @@ const UI = {
     renderRateHistory(rates) {
         const container = document.getElementById('hourlyRateHistory');
         if (!container) return;
-
         const sortedRates = [...rates].sort((a, b) => new Date(`${a.validFrom || '2000-01-01'}T00:00:00`) - new Date(`${b.validFrom || '2000-01-01'}T00:00:00`));
 
         container.innerHTML = sortedRates.map((rate, index) => `
@@ -493,7 +479,6 @@ const UI = {
     renderBikeAllowanceHistory(allowances) {
         const container = document.getElementById('bikeAllowanceHistory');
         if (!container) return;
-
         const sortedAllowances = [...allowances].sort((a, b) => new Date(`${a.validFrom || '2000-01-01'}T00:00:00`) - new Date(`${b.validFrom || '2000-01-01'}T00:00:00`));
 
         container.innerHTML = sortedAllowances.map((item, index) => `
@@ -576,7 +561,6 @@ const UI = {
     renderBonuses(bonuses) {
         const bonusList = document.getElementById('bonusList');
         if (!bonusList) return;
-
         bonusList.innerHTML = (bonuses || []).map((bonus, index) => this.createBonusField(bonus, index)).join('');
     },
 
@@ -591,7 +575,6 @@ const UI = {
                     <h4>Toeslag ${index + 1}</h4>
                     <button type="button" class="btn btn-danger btn-small" onclick="UI.removeBonusField(${index})">Verwijder</button>
                 </div>
-
                 <div class="bonus-row">
                     <div class="form-group">
                         <label>Vanaf datum</label>
@@ -614,12 +597,10 @@ const UI = {
                         <input type="time" class="bonus-end-${index}" value="${formatTimeValue(bonus.endHour)}" placeholder="06:00">
                     </div>
                 </div>
-
                 <div class="bonus-row-checkboxes">
                     ${days.map((day, dayIndex) => `
                         <label class="checkbox-inline">
-                            <input type="checkbox" class="bonus-day-${index}-${dayIndex}" ${selectedDays.includes(dayIndex) ? 'checked' : ''}>
-                            ${day}
+                            <input type="checkbox" class="bonus-day-${index}-${dayIndex}" ${selectedDays.includes(dayIndex) ? 'checked' : ''}>${day}
                         </label>
                     `).join('')}
                 </div>
@@ -630,15 +611,9 @@ const UI = {
     addBonusField() {
         const bonusList = document.getElementById('bonusList');
         if (!bonusList) return;
-
         const newIndex = bonusList.querySelectorAll('.bonus-item').length;
         bonusList.insertAdjacentHTML('beforeend', this.createBonusField({
-            name: '',
-            percentage: 0,
-            validFrom: new Date().toISOString().split('T')[0],
-            startHour: '22:00',
-            endHour: '06:00',
-            days: [0, 1, 2, 3, 4, 5, 6]
+            name: '', percentage: 0, validFrom: new Date().toISOString().split('T')[0], startHour: '22:00', endHour: '06:00', days: [0, 1, 2, 3, 4, 5, 6]
         }, newIndex));
     },
 
@@ -651,38 +626,26 @@ const UI = {
 
     handleSettingsSave(e) {
         e.preventDefault();
-
         const hourlyRates = [];
-        const rateItems = document.querySelectorAll('#hourlyRateHistory .history-item');
-        rateItems.forEach((item, index) => {
+        document.querySelectorAll('#hourlyRateHistory .history-item').forEach((item, index) => {
             const validFromInput = item.querySelector(`.rate-valid-from-${index}`);
             const amountInput = item.querySelector(`.rate-amount-${index}`);
             if (validFromInput && amountInput && validFromInput.value && amountInput.value !== '') {
-                hourlyRates.push({
-                    id: Date.now() + index,
-                    amount: Number(amountInput.value) || 0,
-                    validFrom: validFromInput.value
-                });
+                hourlyRates.push({ id: Date.now() + index, amount: Number(amountInput.value) || 0, validFrom: validFromInput.value });
             }
         });
 
         const bikeAllowances = [];
-        const bikeItems = document.querySelectorAll('#bikeAllowanceHistory .history-item');
-        bikeItems.forEach((item, index) => {
+        document.querySelectorAll('#bikeAllowanceHistory .history-item').forEach((item, index) => {
             const validFromInput = item.querySelector(`.bike-valid-from-${index}`);
             const amountInput = item.querySelector(`.bike-amount-${index}`);
             if (validFromInput && amountInput && validFromInput.value && amountInput.value !== '') {
-                bikeAllowances.push({
-                    id: Date.now() + index,
-                    amount: Number(amountInput.value) || 0,
-                    validFrom: validFromInput.value
-                });
+                bikeAllowances.push({ id: Date.now() + index, amount: Number(amountInput.value) || 0, validFrom: validFromInput.value });
             }
         });
 
         const bonuses = [];
-        const bonusItems = document.querySelectorAll('#bonusList .bonus-item');
-        bonusItems.forEach((item, index) => {
+        document.querySelectorAll('#bonusList .bonus-item').forEach((item, index) => {
             const validFromInput = item.querySelector(`.bonus-valid-from-${index}`);
             const nameInput = item.querySelector(`.bonus-name-${index}`);
             const percentageInput = item.querySelector(`.bonus-percentage-${index}`);
@@ -699,17 +662,14 @@ const UI = {
                 if (dayCheck && dayCheck.checked) days.push(i);
             }
 
-            const bonusStart = startInput && startInput.value ? startInput.value : undefined;
-            const bonusEnd = endInput && endInput.value ? endInput.value : undefined;
-
             bonuses.push({
                 id: Date.now() + index,
                 type: 'percentage',
                 name: nameInput.value || `Toeslag ${index + 1}`,
                 validFrom: validFromInput && validFromInput.value ? validFromInput.value : new Date().toISOString().split('T')[0],
                 percentage: percentage,
-                startHour: bonusStart,
-                endHour: bonusEnd,
+                startHour: startInput && startInput.value ? startInput.value : undefined,
+                endHour: endInput && endInput.value ? endInput.value : undefined,
                 days: days.length ? days : [0, 1, 2, 3, 4, 5, 6]
             });
         });
@@ -726,16 +686,14 @@ const UI = {
         this.renderDashboard();
     },
 
+    // Rapportage hiërarchisch systeem
     renderReportYearSelect() {
         const entries = DataManager.getEntries();
         const reportContainer = document.getElementById('reportContainer');
         if (!reportContainer) return;
 
         const years = new Set();
-        entries.forEach(entry => {
-            const year = new Date(`${entry.date}T00:00:00`).getFullYear();
-            years.add(year);
-        });
+        entries.forEach(entry => years.add(new Date(`${entry.date}T00:00:00`).getFullYear()));
 
         if (years.size === 0) {
             reportContainer.innerHTML = '<div class="empty-state"><p>Geen werkdagen geregistreerd</p></div>';
@@ -745,52 +703,41 @@ const UI = {
         const sortedYears = Array.from(years).sort((a, b) => b - a);
 
         reportContainer.innerHTML = `
-            <div class="report-selector">
-                <h3>Selecteer een jaar</h3>
-                <div class="year-buttons">
-                    ${sortedYears.map(year => `
-                        <button class="btn btn-primary" onclick="UI.selectReportYear(${year})">${year}</button>
-                    `).join('')}
-                </div>
-                <div id="reportContent"></div>
+            <h3>Selecteer een jaar</h3>
+            <div class="button-stack" style="margin-bottom: 20px;">
+                ${sortedYears.map(year => `
+                    <button class="btn btn-primary" onclick="UI.selectReportYear(${year})">${year}</button>
+                `).join('')}
             </div>
+            <div id="reportSubContent"></div>
         `;
     },
 
     selectReportYear(year) {
         this.currentReportYear = year;
         const entries = DataManager.getEntries();
-        const reportContainer = document.getElementById('reportContent');
+        const subContent = document.getElementById('reportSubContent');
+        if (!subContent) return;
 
-        const yearEntries = entries.filter(e => {
-            const entryYear = new Date(`${e.date}T00:00:00`).getFullYear();
-            return entryYear === year;
-        });
-
+        const yearEntries = entries.filter(e => new Date(`${e.date}T00:00:00`).getFullYear() === year);
         const months = new Set();
-        yearEntries.forEach(entry => {
-            const month = new Date(`${entry.date}T00:00:00`).getMonth();
-            months.add(month);
-        });
+        yearEntries.forEach(entry => months.add(new Date(`${e.date}T00:00:00`).getMonth()));
 
-        const sortedMonths = Array.from(months).sort((a, b) => b - a);
-        const monthNames = ['Jan', 'Feb', 'Mrt', 'Apr', 'Mei', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dec'];
+        const sortedMonths = Array.from(months).sort((a, b) => a - b);
 
-        reportContainer.innerHTML = `
+        subContent.innerHTML = `
             <h3>Maanden in ${year}</h3>
-            <div class="month-buttons">
+            <div class="button-stack" style="margin-bottom: 20px;">
+                <button class="btn btn-primary" onclick="UI.showYearSummary(${year})">Heel jaar ${year} (Overzicht)</button>
                 ${sortedMonths.map(month => {
-                    const date = new Date(year, month, 1);
-                    const monthName = date.toLocaleDateString('nl-NL', { month: 'long' });
-                    const yearMonth = `${year}-${String(month + 1).padStart(2, '0')}`;
+                    const monthName = new Date(year, month, 1).toLocaleDateString('nl-NL', { month: 'long' });
                     return `
                         <button class="btn btn-secondary" onclick="UI.selectReportMonth(${year}, ${month})">${monthName}</button>
                     `;
                 }).join('')}
-                <button class="btn btn-success" onclick="UI.showYearSummary(${year})">Heel jaar ${year}</button>
-                <button class="btn btn-default" onclick="UI.renderReportYearSelect()">Terug</button>
             </div>
-            <div id="reportMonthContent"></div>
+            <button class="btn btn-secondary btn-small" onclick="UI.renderReportYearSelect()">Terug naar jaren</button>
+            <div id="reportDetailContent" style="margin-top: 20px;"></div>
         `;
     },
 
@@ -800,36 +747,36 @@ const UI = {
 
         const entries = DataManager.getEntries();
         const settings = DataManager.getSettings();
-        const reportContainer = document.getElementById('reportMonthContent');
+        const detailContent = document.getElementById('reportDetailContent');
+        if (!detailContent) return;
 
         const monthEntries = entries.filter(e => {
-            const date = new Date(`${e.date}T00:00:00`);
-            return date.getFullYear() === year && date.getMonth() === month;
+            const d = new Date(`${e.date}T00:00:00`);
+            return d.getFullYear() === year && d.getMonth() === month;
         }).sort((a, b) => new Date(`${a.date}T00:00:00`) - new Date(`${b.date}T00:00:00`));
 
         const monthTotal = monthEntries.reduce((sum, e) => sum + Calculator.calculateEarnings(e, settings).total, 0);
         const yearMonth = `${year}-${String(month + 1).padStart(2, '0')}`;
         const actualAmount = DataManager.getActual(yearMonth);
-
         const monthName = new Date(year, month, 1).toLocaleDateString('nl-NL', { month: 'long', year: 'numeric' });
 
         let html = `
             <h4>${monthName}</h4>
             <div class="report-summary">
-                <p><strong>Berekend:</strong> €${monthTotal.toFixed(2)}</p>
-                <div class="form-group">
+                <p><strong>Berekend totaal:</strong> €${monthTotal.toFixed(2)}</p>
+                <div class="form-group" style="margin-top: 12px; max-width: 300px;">
                     <label>Daadwerkelijk ontvangen (€):</label>
                     <div style="display: flex; gap: 10px; align-items: center;">
-                        <input type="number" step="0.01" id="actualAmount" value="${actualAmount || ''}" placeholder="0,00">
-                        <button class="btn btn-primary" onclick="UI.saveActualAmount('${yearMonth}')">Opslaan</button>
+                        <input type="number" step="0.01" id="actualAmountInput" value="${actualAmount !== null ? actualAmount : ''}" placeholder="0,00">
+                        <button class="btn btn-primary btn-small" onclick="UI.saveActualAmount('${yearMonth}')">Opslaan</button>
                     </div>
                 </div>
         `;
 
-        if (actualAmount) {
+        if (actualAmount !== null) {
             const difference = actualAmount - monthTotal;
             const diffClass = difference >= 0 ? 'positive' : 'negative';
-            html += `<p><strong>Verschil:</strong> <span class="${diffClass}">${difference >= 0 ? '+' : ''}€${difference.toFixed(2)}</span></p>`;
+            html += `<p style="margin-top: 8px;"><strong>Verschil:</strong> <span class="${diffClass}">${difference >= 0 ? '+' : ''}€${difference.toFixed(2)}</span></p>`;
         }
 
         html += `</div><table class="report-table"><thead><tr><th>Datum</th><th>Uren</th><th>Basis</th><th>Bonus</th><th>Fiets</th><th>Totaal</th></tr></thead><tbody>`;
@@ -837,22 +784,18 @@ const UI = {
         monthEntries.forEach(entry => {
             const earnings = Calculator.calculateEarnings(entry, settings);
             const date = new Date(`${entry.date}T00:00:00`).toLocaleDateString('nl-NL');
-            html += `<tr><td>${date}</td><td>${earnings.hours}</td><td>€${earnings.baseEarnings.toFixed(2)}</td><td>€${earnings.bonusEarnings.toFixed(2)}</td><td>€${earnings.bikeAllowance.toFixed(2)}</td><td><strong>€${earnings.total.toFixed(2)}</strong></td></tr>`;
+            html += `<tr><td>${date}</td><td>${earnings.hours}u</td><td>€${earnings.baseEarnings.toFixed(2)}</td><td>€${earnings.bonusEarnings.toFixed(2)}</td><td>€${earnings.bikeAllowance.toFixed(2)}</td><td><strong>€${earnings.total.toFixed(2)}</strong></td></tr>`;
         });
 
-        html += `</tbody></table><button class="btn btn-default" onclick="UI.selectReportYear(${year})">Terug</button>`;
-
-        reportContainer.innerHTML = html;
+        html += `</tbody></table>`;
+        detailContent.innerHTML = html;
     },
 
     saveActualAmount(yearMonth) {
-        const amount = document.getElementById('actualAmount').value;
-        if (amount === '') {
-            alert('Voer een bedrag in');
-            return;
-        }
-        DataManager.saveActual(yearMonth, amount);
-        alert('Bedrag opgeslagen!');
+        const input = document.getElementById('actualAmountInput');
+        if (!input) return;
+        DataManager.saveActual(yearMonth, input.value);
+        alert('Daadwerkelijk bedrag opgeslagen!');
         this.renderDashboard();
         const [year, month] = yearMonth.split('-');
         this.selectReportMonth(parseInt(year), parseInt(month) - 1);
@@ -861,35 +804,34 @@ const UI = {
     showYearSummary(year) {
         const entries = DataManager.getEntries();
         const settings = DataManager.getSettings();
-        const reportContainer = document.getElementById('reportMonthContent');
+        const detailContent = document.getElementById('reportDetailContent');
+        if (!detailContent) return;
 
-        const yearEntries = entries.filter(e => {
-            const entryYear = new Date(`${e.date}T00:00:00`).getFullYear();
-            return entryYear === year;
-        }).sort((a, b) => new Date(`${a.date}T00:00:00`) - new Date(`${b.date}T00:00:00`));
-
+        const yearEntries = entries.filter(e => new Date(`${e.date}T00:00:00`).getFullYear() === year);
         const yearTotal = yearEntries.reduce((sum, e) => sum + Calculator.calculateEarnings(e, settings).total, 0);
-
         const actuals = DataManager.getActuals();
+
         let actualYearTotal = 0;
-        for (let month = 0; month < 12; month++) {
-            const yearMonth = `${year}-${String(month + 1).padStart(2, '0')}`;
-            if (actuals[yearMonth]) {
-                actualYearTotal += actuals[yearMonth];
+        let hasAnyActual = false;
+        for (let m = 0; m < 12; m++) {
+            const ym = `${year}-${String(m + 1).padStart(2, '0')}`;
+            if (actuals[ym] !== undefined && actuals[ym] !== null) {
+                actualYearTotal += Number(actuals[ym]);
+                hasAnyActual = true;
             }
         }
 
         let html = `
-            <h4>Overzicht ${year}</h4>
+            <h4>Jaaroverzicht ${year}</h4>
             <div class="report-summary">
                 <p><strong>Berekend totaal:</strong> €${yearTotal.toFixed(2)}</p>
         `;
 
-        if (actualYearTotal > 0) {
+        if (hasAnyActual) {
             const difference = actualYearTotal - yearTotal;
             const diffClass = difference >= 0 ? 'positive' : 'negative';
             html += `
-                <p><strong>Daadwerkelijk ontvangen:</strong> €${actualYearTotal.toFixed(2)}</p>
+                <p><strong>Daadwerkelijk ontvangen totaal:</strong> €${actualYearTotal.toFixed(2)}</p>
                 <p><strong>Verschil:</strong> <span class="${diffClass}">${difference >= 0 ? '+' : ''}€${difference.toFixed(2)}</span></p>
             `;
         }
@@ -899,29 +841,100 @@ const UI = {
         const monthNames = ['Januari', 'Februari', 'Maart', 'April', 'Mei', 'Juni', 'Juli', 'Augustus', 'September', 'Oktober', 'November', 'December'];
 
         for (let month = 0; month < 12; month++) {
-            const yearMonth = `${year}-${String(month + 1).padStart(2, '0')}`;
-            const monthEntries = yearEntries.filter(e => {
-                const entryMonth = new Date(`${e.date}T00:00:00`).getMonth();
-                return entryMonth === month;
-            });
+            const ym = `${year}-${String(month + 1).padStart(2, '0')}`;
+            const mEntries = yearEntries.filter(e => new Date(`${e.date}T00:00:00`).getMonth() === month);
+            const mTotal = mEntries.reduce((sum, e) => sum + Calculator.calculateEarnings(e, settings).total, 0);
+            const actualVal = actuals[ym];
 
-            const monthTotal = monthEntries.reduce((sum, e) => sum + Calculator.calculateEarnings(e, settings).total, 0);
-            const actualAmount = actuals[yearMonth];
-            const difference = actualAmount ? actualAmount - monthTotal : 0;
-
-            if (monthTotal > 0 || actualAmount) {
-                const diffClass = difference >= 0 ? 'positive' : 'negative';
-                html += `<tr><td>${monthNames[month]}</td><td>€${monthTotal.toFixed(2)}</td><td>${actualAmount ? `€${actualAmount.toFixed(2)}` : '-'}</td><td>${difference ? `<span class="${diffClass}">${difference >= 0 ? '+' : ''}€${difference.toFixed(2)}</span>` : '-'}</td></tr>`;
+            if (mTotal > 0 || actualVal !== undefined) {
+                const diff = actualVal !== undefined ? actualVal - mTotal : 0;
+                const diffClass = diff >= 0 ? 'positive' : 'negative';
+                html += `<tr>
+                    <td>${monthNames[month]}</td>
+                    <td>€${mTotal.toFixed(2)}</td>
+                    <td>${actualVal !== undefined ? `€${Number(actualVal).toFixed(2)}` : '-'}</td>
+                    <td>${actualVal !== undefined ? `<span class="${diffClass}">${diff >= 0 ? '+' : ''}€${diff.toFixed(2)}</span>` : '-'}</td>
+                </tr>`;
             }
         }
 
-        html += `</tbody></table><button class="btn btn-default" onclick="UI.selectReportYear(${year})">Terug</button>`;
+        html += `</tbody></table>`;
+        detailContent.innerHTML = html;
+    },
 
-        reportContainer.innerHTML = html;
+    // Cloud Sync Logica via Firebase Realtime Database
+    loadCloudFormConfig() {
+        const config = DataManager.getCloudConfig();
+        if (!config) return;
+        if (document.getElementById('cloudApiKey')) document.getElementById('cloudApiKey').value = config.apiKey || '';
+        if (document.getElementById('cloudAuthDomain')) document.getElementById('cloudAuthDomain').value = config.authDomain || '';
+        if (document.getElementById('cloudProjectId')) document.getElementById('cloudProjectId').value = config.projectId || '';
+        if (document.getElementById('cloudDatabaseURL')) document.getElementById('cloudDatabaseURL').value = config.databaseURL || '';
+    },
+
+    saveCloudConfigFromUI() {
+        const config = {
+            apiKey: document.getElementById('cloudApiKey').value.trim(),
+            authDomain: document.getElementById('cloudAuthDomain').value.trim(),
+            projectId: document.getElementById('cloudProjectId').value.trim(),
+            databaseURL: document.getElementById('cloudDatabaseURL').value.trim()
+        };
+        DataManager.saveCloudConfig(config);
+        alert('Cloud configuratie opgeslagen!');
+    },
+
+    initFirebase() {
+        const config = DataManager.getCloudConfig();
+        if (!config || !config.databaseURL || !config.projectId) {
+            alert('Vul eerst alle Firebase instellingen in bij Instellingen en sla ze op.');
+            return null;
+        }
+        if (!firebase.apps.length) {
+            firebase.initializeApp(config);
+        }
+        return firebase.database();
+    },
+
+    syncToCloud() {
+        const db = this.initFirebase();
+        if (!db) return;
+
+        const payload = {
+            entries: DataManager.getEntries(),
+            settings: DataManager.getSettings(),
+            actuals: DataManager.getActuals(),
+            updatedAt: new Date().toISOString()
+        };
+
+        db.ref('flexijob_data').set(payload)
+            .then(() => alert('Gegevens succesvol naar de cloud gesynchroniseerd!'))
+            .catch(error => alert('Fout bij synchroniseren: ' + error.message));
+    },
+
+    loadFromCloud() {
+        const db = this.initFirebase();
+        if (!db) return;
+
+        db.ref('flexijob_data').once('value')
+            .then(snapshot => {
+                const data = snapshot.val();
+                if (!data) {
+                    alert('Geen gegevens gevonden in de cloud.');
+                    return;
+                }
+                if (data.entries) DataManager.saveEntries(data.entries);
+                if (data.settings) DataManager.saveSettings(data.settings);
+                if (data.actuals) DataManager.saveActuals(data.actuals);
+
+                alert('Gegevens succesvol geladen vanuit de cloud!');
+                this.renderDashboard();
+                this.renderAllEntries();
+                this.renderSettings();
+            })
+            .catch(error => alert('Fout bij laden van cloud: ' + error.message));
     }
 };
 
-// Initialize on load
 document.addEventListener('DOMContentLoaded', () => {
     UI.init();
 });
