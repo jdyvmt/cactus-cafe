@@ -97,7 +97,7 @@ const DataManager = {
 const Calculator = {
     calculateEarnings(entry, settings) {
         const start = new Date(`2000-01-01T${entry.startTime}`);
-        const end = new Date(`2000-01-01T${entry.endTime}`);
+        let end = new Date(`2000-01-01T${entry.endTime}`);
 
         let hours = (end - start) / (1000 * 60 * 60);
         if (hours < 0) hours += 24;
@@ -151,22 +151,33 @@ const Calculator = {
         let shiftEnd = endMinutes;
 
         if (shiftEnd === null || shiftStart === null) return 0;
+        // Als eindtijd voor of gelijk is aan starttijd, loopt de dienst door tot de volgende dag
         if (shiftEnd <= shiftStart) shiftEnd += 24 * 60;
 
         const bonusStart = toMinutesFromValue(bonus.startHour);
         const bonusEnd = toMinutesFromValue(bonus.endHour);
 
-        let targetHours = hours;
+        let targetHours = 0;
 
         if (bonusStart !== null && bonusEnd !== null) {
             let bonusWindowStart = bonusStart;
             let bonusWindowEnd = bonusEnd;
             if (bonusWindowEnd <= bonusWindowStart) bonusWindowEnd += 24 * 60;
 
-            const overlapStart = Math.max(shiftStart, bonusWindowStart);
-            const overlapEnd = Math.min(shiftEnd, bonusWindowEnd);
-            const overlapMinutes = Math.max(0, overlapEnd - overlapStart);
+            // Om middernacht correct te dekken als de bonuswindow op de volgende dag valt (bijv 00:00 tot 06:00)
+            // Controleren we zowel de reguliere window als de verschoven window (+24 uur)
+            const overlap1Start = Math.max(shiftStart, bonusWindowStart);
+            const overlap1End = Math.min(shiftEnd, bonusWindowEnd);
+            let overlapMinutes = Math.max(0, overlap1End - overlap1Start);
+
+            // Check ook voor de nachtperiode op de volgende dag (indien dienst doorloopt na middernacht)
+            const overlap2Start = Math.max(shiftStart, bonusWindowStart + 24 * 60);
+            const overlap2End = Math.min(shiftEnd, bonusWindowEnd + 24 * 60);
+            overlapMinutes += Math.max(0, overlap2End - overlap2Start);
+
             targetHours = overlapMinutes / 60;
+        } else {
+            targetHours = hours;
         }
 
         if (targetHours <= 0) return 0;
