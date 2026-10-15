@@ -193,13 +193,15 @@ const UI = {
     currentReportYear: null,
     currentReportMonth: null,
 
+   // Voeg dit toe in UI of vervang de betreffende methoden in UI:
+
     init() {
         this.setupEventListeners();
-        this.setDefaultDate();
         this.renderSettings();
         this.renderDashboard();
         this.renderAllEntries();
         this.loadCloudFormConfig();
+        this.resetMultiForm(); // Start met één lege rij
     },
 
     setupEventListeners() {
@@ -207,8 +209,11 @@ const UI = {
             btn.addEventListener('click', (e) => this.switchTab(e.target.dataset.tab));
         });
 
-        const bulkForm = document.getElementById('bulkWorkForm');
-        if (bulkForm) bulkForm.addEventListener('submit', (e) => this.handleBulkLogWork(e));
+        const multiForm = document.getElementById('multiWorkForm');
+        if (multiForm) multiForm.addEventListener('submit', (e) => this.handleMultiWorkSave(e));
+
+        const addRowBtn = document.getElementById('addRowBtn');
+        if (addRowBtn) addRowBtn.addEventListener('click', () => this.addEntryRow());
 
         const settingsForm = document.getElementById('settingsForm');
         if (settingsForm) settingsForm.addEventListener('submit', (e) => this.handleSettingsSave(e));
@@ -232,50 +237,74 @@ const UI = {
         if (loadFromCloudBtn) loadFromCloudBtn.addEventListener('click', () => this.loadFromCloud());
     },
 
-    switchTab(tabName) {
-        document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
-        document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
-
-        const tab = document.getElementById(tabName);
-        if (tab) tab.classList.add('active');
-
-        const btn = document.querySelector(`[data-tab="${tabName}"]`);
-        if (btn) btn.classList.add('active');
-
-        if (tabName === 'dashboard') this.renderDashboard();
-        if (tabName === 'logwork') this.renderAllEntries();
-        if (tabName === 'settings') this.renderSettings();
-        if (tabName === 'report') this.renderReportYearSelect();
+    resetMultiForm() {
+        const container = document.getElementById('entriesRowsContainer');
+        if (!container) return;
+        container.innerHTML = '';
+        this.addEntryRow(); // Voeg direct 1 standaard rij toe
     },
 
-    setDefaultDate() {
+    addEntryRow(defaultDate = '', defaultStart = '', defaultEnd = '', defaultNotes = '') {
+        const container = document.getElementById('entriesRowsContainer');
+        if (!container) return;
+        
+        const index = container.querySelectorAll('.entry-input-row').length;
         const today = new Date().toISOString().split('T')[0];
-        const bulkStartDate = document.getElementById('bulkStartDate');
-        if (bulkStartDate) bulkStartDate.value = today;
+
+        const rowHtml = `
+            <div class="entry-input-row" style="background: white; border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 12px; display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)) auto; gap: 12px; align-items: end;">
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label>Datum:</label>
+                    <input type="date" class="row-date" value="${defaultDate || today}" required>
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label>Starttijd:</label>
+                    <input type="time" class="row-start" value="${defaultStart}" required>
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label>Eindtijd:</label>
+                    <input type="time" class="row-end" value="${defaultEnd}" required>
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label>Notitie (opt.):</label>
+                    <input type="text" class="row-notes" value="${defaultNotes}" placeholder="Bijzonderheid...">
+                </div>
+                <div>
+                    <button type="button" class="btn btn-danger btn-small" onclick="UI.removeEntryRow(this)">Verwijder</button>
+                </div>
+            </div>
+        `;
+        container.insertAdjacentHTML('beforeend', rowHtml);
     },
 
-   handleBulkLogWork(e) {
-        e.preventDefault();
-
-        const datesInput = document.getElementById('bulkDates').value.trim();
-        const startTime = document.getElementById('bulkStartTime').value;
-        const endTime = document.getElementById('bulkEndTime').value;
-        const notes = document.getElementById('bulkNotes').value;
-
-        if (!datesInput || !startTime || !endTime) {
-            alert('Vul alstublieft alle vereiste velden in');
-            return;
+    removeEntryRow(btn) {
+        const container = document.getElementById('entriesRowsContainer');
+        const rows = container.querySelectorAll('.entry-input-row');
+        // Zorg dat er altijd minimaal 1 rij overblijft
+        if (rows.length > 1) {
+            btn.closest('.entry-input-row').remove();
+        } else {
+            alert('Je moet minimaal één rij behouden.');
         }
+    },
 
-        // Splits op komma's om meerdere losse datums te ondersteunen
-        const dateStrings = datesInput.split(',').map(d => d.trim()).filter(d => d);
+    handleMultiWorkSave(e) {
+        e.preventDefault();
+        const container = document.getElementById('entriesRowsContainer');
+        if (!container) return;
+
+        const rows = container.querySelectorAll('.entry-input-row');
         let count = 0;
 
-        dateStrings.forEach(dateStr => {
-            // Eenvoudige validatie of formaat (YYYY-MM-DD) klopt
-            if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+        rows.forEach(row => {
+            const date = row.querySelector('.row-date').value;
+            const startTime = row.querySelector('.row-start').value;
+            const endTime = row.querySelector('.row-end').value;
+            const notes = row.querySelector('.row-notes').value;
+
+            if (date && startTime && endTime) {
                 DataManager.addEntry({
-                    date: dateStr,
+                    date: date,
                     startTime: startTime,
                     endTime: endTime,
                     notes: notes
@@ -284,15 +313,14 @@ const UI = {
             }
         });
 
-        if (count === 0) {
-            alert('Geen geldige datums gevonden. Gebruik het formaat JJJJ-MM-DD (gescheiden door komma\'s).');
-            return;
+        if (count > 0) {
+            alert(`${count} werkdag(en) succesvol opgeslagen!`);
+            this.resetMultiForm();
+            this.renderAllEntries();
+            this.renderDashboard();
+        } else {
+            alert('Vul alstublieft bij ten minste één rij alle verplichte velden in.');
         }
-
-        alert(`${count} werkdag(en) succesvol opgeslagen!`);
-        e.target.reset();
-        this.renderAllEntries();
-        this.renderDashboard();
     },
 
     renderDashboard() {
