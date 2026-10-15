@@ -158,7 +158,6 @@ const Calculator = {
 
         let targetHours = hours;
 
-        // Als er specifieke uren zijn ingesteld, bereken dan de overlap
         if (bonusStart !== null && bonusEnd !== null) {
             let bonusWindowStart = bonusStart;
             let bonusWindowEnd = bonusEnd;
@@ -174,9 +173,8 @@ const Calculator = {
 
         let bonusPerUnit = 0;
         if (bonus.type === 'amount') {
-            bonusPerUnit = Number(bonus.amountValue || 0); // vast bedrag per uur
+            bonusPerUnit = Number(bonus.amountValue || 0);
         } else {
-            // percentage van het uurloon
             bonusPerUnit = hourlyRate * (Number(bonus.percentage || 0) / 100);
         }
 
@@ -570,7 +568,7 @@ const UI = {
         const days = ['Zo', 'Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za'];
         const selectedDays = bonus.days || [];
         const today = new Date().toISOString().split('T')[0];
-        const bonusType = bonus.type || 'amount'; // standaard op bedrag per uur gezet
+        const bonusType = bonus.type || 'amount';
 
         return `
             <div class="bonus-item">
