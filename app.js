@@ -193,15 +193,13 @@ const UI = {
     currentReportYear: null,
     currentReportMonth: null,
 
-   // Voeg dit toe in UI of vervang de betreffende methoden in UI:
-
     init() {
         this.setupEventListeners();
         this.renderSettings();
         this.renderDashboard();
         this.renderAllEntries();
         this.loadCloudFormConfig();
-        this.resetMultiForm(); // Start met één lege rij
+        this.resetMultiForm();
     },
 
     setupEventListeners() {
@@ -237,37 +235,51 @@ const UI = {
         if (loadFromCloudBtn) loadFromCloudBtn.addEventListener('click', () => this.loadFromCloud());
     },
 
+    switchTab(tabName) {
+        document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
+        document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
+
+        const tab = document.getElementById(tabName);
+        if (tab) tab.classList.add('active');
+
+        const btn = document.querySelector(`[data-tab="${tabName}"]`);
+        if (btn) btn.classList.add('active');
+
+        if (tabName === 'dashboard') this.renderDashboard();
+        if (tabName === 'logwork') this.renderAllEntries();
+        if (tabName === 'settings') this.renderSettings();
+        if (tabName === 'report') this.renderReportYearSelect();
+    },
+
     resetMultiForm() {
         const container = document.getElementById('entriesRowsContainer');
         if (!container) return;
         container.innerHTML = '';
-        this.addEntryRow(); // Voeg direct 1 standaard rij toe
+        this.addEntryRow();
     },
 
-    addEntryRow(defaultDate = '', defaultStart = '', defaultEnd = '', defaultNotes = '') {
+    addEntryRow() {
         const container = document.getElementById('entriesRowsContainer');
         if (!container) return;
-        
-        const index = container.querySelectorAll('.entry-input-row').length;
         const today = new Date().toISOString().split('T')[0];
 
         const rowHtml = `
             <div class="entry-input-row" style="background: white; border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 12px; display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)) auto; gap: 12px; align-items: end;">
                 <div class="form-group" style="margin-bottom: 0;">
                     <label>Datum:</label>
-                    <input type="date" class="row-date" value="${defaultDate || today}" required>
+                    <input type="date" class="row-date" value="${today}" required>
                 </div>
                 <div class="form-group" style="margin-bottom: 0;">
                     <label>Starttijd:</label>
-                    <input type="time" class="row-start" value="${defaultStart}" required>
+                    <input type="time" class="row-start" required>
                 </div>
                 <div class="form-group" style="margin-bottom: 0;">
                     <label>Eindtijd:</label>
-                    <input type="time" class="row-end" value="${defaultEnd}" required>
+                    <input type="time" class="row-end" required>
                 </div>
                 <div class="form-group" style="margin-bottom: 0;">
                     <label>Notitie (opt.):</label>
-                    <input type="text" class="row-notes" value="${defaultNotes}" placeholder="Bijzonderheid...">
+                    <input type="text" class="row-notes" placeholder="Bijzonderheid...">
                 </div>
                 <div>
                     <button type="button" class="btn btn-danger btn-small" onclick="UI.removeEntryRow(this)">Verwijder</button>
@@ -280,7 +292,6 @@ const UI = {
     removeEntryRow(btn) {
         const container = document.getElementById('entriesRowsContainer');
         const rows = container.querySelectorAll('.entry-input-row');
-        // Zorg dat er altijd minimaal 1 rij overblijft
         if (rows.length > 1) {
             btn.closest('.entry-input-row').remove();
         } else {
