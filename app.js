@@ -36,7 +36,7 @@ const DataManager = {
 
     addEntry(entry) {
         const entries = this.getEntries();
-        entry.id = Date.now().toString() + Math.random().toString(36.substr(2, 5));
+        entry.id = Date.now().toString() + Math.random().toString(36).substring(2, 7);
         entries.push(entry);
         this.saveEntries(entries);
         return entry;
@@ -309,7 +309,6 @@ const UI = {
         });
         const totalLastYear = sameMonthLastYearEntries.reduce((sum, e) => sum + Calculator.calculateEarnings(e, settings).total, 0);
 
-        // Totaal alle jaren op basis van effectief ontvangen (of berekend als er geen effectief bedrag is)
         let allYearsEffectiveTotal = 0;
         const years = new Set();
         entries.forEach(e => years.add(new Date(`${e.date}T00:00:00`).getFullYear()));
@@ -320,7 +319,6 @@ const UI = {
                 if (actuals[yearMonth] !== undefined && actuals[yearMonth] !== null) {
                     allYearsEffectiveTotal += Number(actuals[yearMonth]);
                 } else {
-                    // Fallback naar berekend voor die maand indien geen daadwerkelijk bedrag ingevoerd is
                     const monthEntries = entries.filter(e => {
                         const d = new Date(`${e.date}T00:00:00`);
                         return d.getFullYear() === year && d.getMonth() === month;
@@ -686,7 +684,6 @@ const UI = {
         this.renderDashboard();
     },
 
-    // Rapportage hiërarchisch systeem
     renderReportYearSelect() {
         const entries = DataManager.getEntries();
         const reportContainer = document.getElementById('reportContainer');
@@ -721,7 +718,7 @@ const UI = {
 
         const yearEntries = entries.filter(e => new Date(`${e.date}T00:00:00`).getFullYear() === year);
         const months = new Set();
-        yearEntries.forEach(entry => months.add(new Date(`${e.date}T00:00:00`).getMonth()));
+        yearEntries.forEach(entry => months.add(new Date(`${entry.date}T00:00:00`).getMonth()));
 
         const sortedMonths = Array.from(months).sort((a, b) => a - b);
 
@@ -862,7 +859,6 @@ const UI = {
         detailContent.innerHTML = html;
     },
 
-    // Cloud Sync Logica via Firebase Realtime Database
     loadCloudFormConfig() {
         const config = DataManager.getCloudConfig();
         if (!config) return;
