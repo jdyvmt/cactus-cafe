@@ -113,14 +113,8 @@ const Calculator = {
 
         if (settings.bonuses && Array.isArray(settings.bonuses)) {
             settings.bonuses.forEach(bonus => {
-                if (bonus.type === 'percentage') {
-                    const bonusAmount = this.calculateBonusPercentage(entry, bonus, hourlyRate, hours, dayOfWeek);
-                    bonusEarnings += bonusAmount;
-                } else if (bonus.type === 'fixed') {
-                    if (this.bonusAppliesToDay(bonus, dayOfWeek)) {
-                        bonusEarnings += bonus.amount;
-                    }
-                }
+                const bonusAmount = this.calculateBonusAmount(entry, bonus, hourlyRate, hours, dayOfWeek);
+                bonusEarnings += bonusAmount;
             });
         }
 
@@ -148,7 +142,7 @@ const Calculator = {
         return Number(effective.amount) || 0;
     },
 
-    calculateBonusPercentage(entry, bonus, hourlyRate, hours, dayOfWeek) {
+    calculateBonusAmount(entry, bonus, hourlyRate, hours, dayOfWeek) {
         if (!this.bonusAppliesToDay(bonus, dayOfWeek)) return 0;
 
         const startMinutes = toMinutesFromValue(entry.startTime);
@@ -162,21 +156,31 @@ const Calculator = {
         const bonusStart = toMinutesFromValue(bonus.startHour);
         const bonusEnd = toMinutesFromValue(bonus.endHour);
 
-        if (bonusStart === null || bonusEnd === null) {
-            return Math.round((hours * hourlyRate * Number(bonus.percentage || 0) / 100) * 100) / 100;
+        let targetHours = hours;
+
+        // Als er specifieke uren zijn ingesteld, bereken dan de overlap
+        if (bonusStart !== null && bonusEnd !== null) {
+            let bonusWindowStart = bonusStart;
+            let bonusWindowEnd = bonusEnd;
+            if (bonusWindowEnd <= bonusWindowStart) bonusWindowEnd += 24 * 60;
+
+            const overlapStart = Math.max(shiftStart, bonusWindowStart);
+            const overlapEnd = Math.min(shiftEnd, bonusWindowEnd);
+            const overlapMinutes = Math.max(0, overlapEnd - overlapStart);
+            targetHours = overlapMinutes / 60;
         }
 
-        let bonusWindowStart = bonusStart;
-        let bonusWindowEnd = bonusEnd;
-        if (bonusWindowEnd <= bonusWindowStart) bonusWindowEnd += 24 * 60;
+        if (targetHours <= 0) return 0;
 
-        const overlapStart = Math.max(shiftStart, bonusWindowStart);
-        const overlapEnd = Math.min(shiftEnd, bonusWindowEnd);
-        const overlapMinutes = Math.max(0, overlapEnd - overlapStart);
-        const bonusHours = overlapMinutes / 60;
+        let bonusPerUnit = 0;
+        if (bonus.type === 'amount') {
+            bonusPerUnit = Number(bonus.amountValue || 0); // vast bedrag per uur
+        } else {
+            // percentage van het uurloon
+            bonusPerUnit = hourlyRate * (Number(bonus.percentage || 0) / 100);
+        }
 
-        if (bonusHours <= 0) return 0;
-        return Math.round((bonusHours * hourlyRate * Number(bonus.percentage || 0) / 100) * 100) / 100;
+        return Math.round((targetHours * bonusPerUnit) * 100) / 100;
     },
 
     bonusAppliesToDay(bonus, dayOfWeek) {
@@ -566,6 +570,7 @@ const UI = {
         const days = ['Zo', 'Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za'];
         const selectedDays = bonus.days || [];
         const today = new Date().toISOString().split('T')[0];
+        const bonusType = bonus.type || 'amount'; // standaard op bedrag per uur gezet
 
         return `
             <div class="bonus-item">
@@ -583,6 +588,17 @@ const UI = {
                         <input type="text" class="bonus-name-${index}" value="${bonus.name || ''}" placeholder="bijv. Nachtwerk">
                     </div>
                     <div class="form-group">
+                        <label>Type toeslag</label>
+                        <select class="bonus-type-${index}" onchange="UI.toggleBonusTypeFields(${index})">
+                            <option value="amount" ${bonusType === 'amount' ? 'selected' : ''}>Vast bedrag (€/u)</option>
+                            <option value="percentage" ${bonusType === 'percentage' ? 'selected' : ''}>Percentage (%)</option>
+                        </select>
+                    </div>
+                    <div class="form-group" id="bonus-amount-group-${index}" style="display: ${bonusType === 'amount' ? 'block' : 'none'};">
+                        <label>Bedrag per uur (€)</label>
+                        <input type="number" step="0.01" min="0" class="bonus-amount-val-${index}" value="${Number(bonus.amountValue || bonus.percentage || 0).toFixed(2)}">
+                    </div>
+                    <div class="form-group" id="bonus-percentage-group-${index}" style="display: ${bonusType === 'percentage' ? 'block' : 'none'};">
                         <label>Percentage (%)</label>
                         <input type="number" step="0.01" min="0" class="bonus-percentage-${index}" value="${Number(bonus.percentage || 0).toFixed(2)}">
                     </div>
@@ -606,12 +622,27 @@ const UI = {
         `;
     },
 
+    toggleBonusTypeFields(index) {
+        const typeSelect = document.querySelector(`.bonus-type-${index}`);
+        const amountGroup = document.getElementById(`bonus-amount-group-${index}`);
+        const percentageGroup = document.getElementById(`bonus-percentage-group-${index}`);
+        if (!typeSelect || !amountGroup || !percentageGroup) return;
+
+        if (typeSelect.value === 'amount') {
+            amountGroup.style.display = 'block';
+            percentageGroup.style.display = 'none';
+        } else {
+            amountGroup.style.display = 'none';
+            percentageGroup.style.display = 'block';
+        }
+    },
+
     addBonusField() {
         const bonusList = document.getElementById('bonusList');
         if (!bonusList) return;
         const newIndex = bonusList.querySelectorAll('.bonus-item').length;
         bonusList.insertAdjacentHTML('beforeend', this.createBonusField({
-            name: '', percentage: 0, validFrom: new Date().toISOString().split('T')[0], startHour: '22:00', endHour: '06:00', days: [0, 1, 2, 3, 4, 5, 6]
+            name: '', type: 'amount', amountValue: 0, percentage: 0, validFrom: new Date().toISOString().split('T')[0], startHour: '22:00', endHour: '06:00', days: [0, 1, 2, 3, 4, 5, 6]
         }, newIndex));
     },
 
@@ -646,13 +677,16 @@ const UI = {
         document.querySelectorAll('#bonusList .bonus-item').forEach((item, index) => {
             const validFromInput = item.querySelector(`.bonus-valid-from-${index}`);
             const nameInput = item.querySelector(`.bonus-name-${index}`);
+            const typeSelect = item.querySelector(`.bonus-type-${index}`);
+            const amountValInput = item.querySelector(`.bonus-amount-val-${index}`);
             const percentageInput = item.querySelector(`.bonus-percentage-${index}`);
             const startInput = item.querySelector(`.bonus-start-${index}`);
             const endInput = item.querySelector(`.bonus-end-${index}`);
 
-            if (!nameInput || !percentageInput) return;
-            const percentage = Number(percentageInput.value) || 0;
-            if (!percentage) return;
+            if (!nameInput || !typeSelect) return;
+            const bonusType = typeSelect.value;
+            const amountValue = amountValInput ? Number(amountValInput.value) || 0 : 0;
+            const percentage = percentageInput ? Number(percentageInput.value) || 0 : 0;
 
             const days = [];
             for (let i = 0; i < 7; i++) {
@@ -662,9 +696,10 @@ const UI = {
 
             bonuses.push({
                 id: Date.now() + index,
-                type: 'percentage',
+                type: bonusType,
                 name: nameInput.value || `Toeslag ${index + 1}`,
                 validFrom: validFromInput && validFromInput.value ? validFromInput.value : new Date().toISOString().split('T')[0],
+                amountValue: amountValue,
                 percentage: percentage,
                 startHour: startInput && startInput.value ? startInput.value : undefined,
                 endHour: endInput && endInput.value ? endInput.value : undefined,
