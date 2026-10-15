@@ -254,39 +254,43 @@ const UI = {
         if (bulkStartDate) bulkStartDate.value = today;
     },
 
-    handleBulkLogWork(e) {
+   handleBulkLogWork(e) {
         e.preventDefault();
 
-        const startDateVal = document.getElementById('bulkStartDate').value;
-        const days = parseInt(document.getElementById('bulkDays').value) || 1;
+        const datesInput = document.getElementById('bulkDates').value.trim();
         const startTime = document.getElementById('bulkStartTime').value;
         const endTime = document.getElementById('bulkEndTime').value;
         const notes = document.getElementById('bulkNotes').value;
 
-        if (!startDateVal || !startTime || !endTime || days < 1) {
+        if (!datesInput || !startTime || !endTime) {
             alert('Vul alstublieft alle vereiste velden in');
             return;
         }
 
-        const startDate = new Date(`${startDateVal}T00:00:00`);
+        // Splits op komma's om meerdere losse datums te ondersteunen
+        const dateStrings = datesInput.split(',').map(d => d.trim()).filter(d => d);
+        let count = 0;
 
-        for (let i = 0; i < days; i++) {
-            const currentDate = new Date(startDate);
-            currentDate.setDate(currentDate.getDate() + i);
-            const dateString = currentDate.toISOString().split('T')[0];
+        dateStrings.forEach(dateStr => {
+            // Eenvoudige validatie of formaat (YYYY-MM-DD) klopt
+            if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                DataManager.addEntry({
+                    date: dateStr,
+                    startTime: startTime,
+                    endTime: endTime,
+                    notes: notes
+                });
+                count++;
+            }
+        });
 
-            const entry = {
-                date: dateString,
-                startTime: startTime,
-                endTime: endTime,
-                notes: notes
-            };
-            DataManager.addEntry(entry);
+        if (count === 0) {
+            alert('Geen geldige datums gevonden. Gebruik het formaat JJJJ-MM-DD (gescheiden door komma\'s).');
+            return;
         }
 
-        alert(`${days} werkdag(en) opgeslagen!`);
+        alert(`${count} werkdag(en) succesvol opgeslagen!`);
         e.target.reset();
-        this.setDefaultDate();
         this.renderAllEntries();
         this.renderDashboard();
     },
