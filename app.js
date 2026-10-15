@@ -39,6 +39,7 @@ const DataManager = {
         entry.id = Date.now().toString() + Math.random().toString(36).substring(2, 7);
         entries.push(entry);
         this.saveEntries(entries);
+        UI.autoSyncPush();
         return entry;
     },
 
@@ -46,6 +47,7 @@ const DataManager = {
         let entries = this.getEntries();
         entries = entries.filter(e => e.id !== id);
         this.saveEntries(entries);
+        UI.autoSyncPush();
     },
 
     getSettings() {
@@ -62,6 +64,7 @@ const DataManager = {
 
     saveSettings(settings) {
         localStorage.setItem(this.STORAGE_KEY_SETTINGS, JSON.stringify(settings));
+        UI.autoSyncPush();
     },
 
     getActuals() {
@@ -71,6 +74,7 @@ const DataManager = {
 
     saveActuals(actuals) {
         localStorage.setItem(this.STORAGE_KEY_ACTUALS, JSON.stringify(actuals));
+        UI.autoSyncPush();
     },
 
     saveActual(yearMonth, amount) {
@@ -81,7 +85,7 @@ const DataManager = {
 
     getActual(yearMonth) {
         const actuals = this.getActuals();
-        return actuals[yearMonth] || null;
+        return actuals[yearMonth] !== undefined ? actuals[yearMonth] : null;
     },
 
     getCloudConfig() {
@@ -151,7 +155,6 @@ const Calculator = {
         let shiftEnd = endMinutes;
 
         if (shiftEnd === null || shiftStart === null) return 0;
-        // Als eindtijd voor of gelijk is aan starttijd, loopt de dienst door tot de volgende dag
         if (shiftEnd <= shiftStart) shiftEnd += 24 * 60;
 
         const bonusStart = toMinutesFromValue(bonus.startHour);
@@ -164,13 +167,10 @@ const Calculator = {
             let bonusWindowEnd = bonusEnd;
             if (bonusWindowEnd <= bonusWindowStart) bonusWindowEnd += 24 * 60;
 
-            // Om middernacht correct te dekken als de bonuswindow op de volgende dag valt (bijv 00:00 tot 06:00)
-            // Controleren we zowel de reguliere window als de verschoven window (+24 uur)
             const overlap1Start = Math.max(shiftStart, bonusWindowStart);
             const overlap1End = Math.min(shiftEnd, bonusWindowEnd);
             let overlapMinutes = Math.max(0, overlap1End - overlap1Start);
 
-            // Check ook voor de nachtperiode op de volgende dag (indien dienst doorloopt na middernacht)
             const overlap2Start = Math.max(shiftStart, bonusWindowStart + 24 * 60);
             const overlap2End = Math.min(shiftEnd, bonusWindowEnd + 24 * 60);
             overlapMinutes += Math.max(0, overlap2End - overlap2Start);
@@ -211,6 +211,7 @@ const UI = {
         this.renderAllEntries();
         this.loadCloudFormConfig();
         this.resetMultiForm();
+        this.initAutoSync();
     },
 
     setupEventListeners() {
@@ -964,21 +965,70 @@ const UI = {
         };
         DataManager.saveCloudConfig(config);
         alert('Cloud configuratie opgeslagen!');
+        this.initAutoSync();
     },
 
     initFirebase() {
         const config = DataManager.getCloudConfig();
-        if (!config || !config.databaseURL || !config.projectId) {
-            alert('Vul eerst alle Firebase instellingen in bij Instellingen en sla ze op.');
-            return null;
-        }
+        if (!config || !config.databaseURL || !config.projectId) return null;
         if (!firebase.apps.length) {
             firebase.initializeApp(config);
         }
         return firebase.database();
     },
 
-    syncToCloud() {
+    initAutoSync() {
+        const config = DataManager.getCloudConfig();
+        if (!config || !config.databaseURL || !config.projectId) return;
+
+        const db = this.initFirebase();
+        if (!db) return;
+
+        db.ref('flexijob_data').on('value', snapshot => {
+            const data = snapshot.val();
+            if (!data) return;
+
+            let hasChanges = false;
+
+            if (data.entries) {
+                const localEntries = JSON.stringify(DataManager.getEntries());
+                const cloudEntries = JSON.stringify(data.entries);
+                if (localEntries !== cloudEntries) {
+                    DataManager.saveEntries(data.entries);
+                    hasChanges = true;
+                }
+            }
+
+            if (data.settings) {
+                const localSettings = JSON.stringify(DataManager.getSettings());
+                const cloudSettings = JSON.stringify(data.settings);
+                if (localSettings !== cloudSettings) {
+                    DataManager.saveSettings(data.settings);
+                    hasChanges = true;
+                }
+            }
+
+            if (data.actuals) {
+                const localActuals = JSON.stringify(DataManager.getActuals());
+                const cloudActuals = JSON.stringify(data.actuals);
+                if (localActuals !== cloudActuals) {
+                    DataManager.saveActuals(data.actuals);
+                    hasChanges = true;
+                }
+            }
+
+            if (hasChanges) {
+                this.renderDashboard();
+                this.renderAllEntries();
+                this.renderSettings();
+            }
+        });
+    },
+
+    autoSyncPush() {
+        const config = DataManager.getCloudConfig();
+        if (!config || !config.databaseURL || !config.projectId) return;
+
         const db = this.initFirebase();
         if (!db) return;
 
@@ -989,14 +1039,22 @@ const UI = {
             updatedAt: new Date().toISOString()
         };
 
-        db.ref('flexijob_data').set(payload)
-            .then(() => alert('Gegevens succesvol naar de cloud gesynchroniseerd!'))
-            .catch(error => alert('Fout bij synchroniseren: ' + error.message));
+        db.ref('flexijob_data').set(payload).catch(error => {
+            console.error('Automatische sync mislukt: ' + error.message);
+        });
+    },
+
+    syncToCloud() {
+        this.autoSyncPush();
+        alert('Gegevens handmatig gesynchroniseerd met de cloud!');
     },
 
     loadFromCloud() {
         const db = this.initFirebase();
-        if (!db) return;
+        if (!db) {
+            alert('Vul eerst alle Firebase instellingen in.');
+            return;
+        }
 
         db.ref('flexijob_data').once('value')
             .then(snapshot => {
@@ -1009,12 +1067,12 @@ const UI = {
                 if (data.settings) DataManager.saveSettings(data.settings);
                 if (data.actuals) DataManager.saveActuals(data.actuals);
 
-                alert('Gegevens succesvol geladen vanuit de cloud!');
+                alert('Gegevens succesvol geladen!');
                 this.renderDashboard();
                 this.renderAllEntries();
                 this.renderSettings();
             })
-            .catch(error => alert('Fout bij laden van cloud: ' + error.message));
+            .catch(error => alert('Fout bij laden: ' + error.message));
     }
 };
 
